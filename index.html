@@ -27,14 +27,15 @@
         import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Configuração do Firebase
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+        const firebaseConfig = {
             apiKey: "AIzaSyCfkSKF1_aQBBmBBWwulhzTOURaV57moIA",
             authDomain: "sample-firebase-ai-app-c92d7.firebaseapp.com",
             projectId: "sample-firebase-ai-app-c92d7",
-            storageBucket: "sample-firebase-ai-app-c92d7.firebasestorage.app",
+            storageBucket: "sample-firebase-ai-app-c92d7.appspot.com", // Verifique se o .appspot.com está correto para storageBucket
             messagingSenderId: "322264041699",
             appId: "1:322264041699:web:ca6fcf0ec49f4dc9b95dd6"
         };
+
 
         const appIdGlobal = typeof __app_id !== 'undefined' ? __app_id : 'default-trilha-edu-app';
 
