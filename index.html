@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trilha Edu - Acompanhamento de Horas</title>
+    <title>Trilha Edu - Tempo & Projetos</title>
     <script type="module">
         // Importações do Firebase
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
@@ -26,560 +26,666 @@
         } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Configuração do Firebase
+        // Configuração do Firebase (SUBSTITUA PELOS SEUS DADOS SE NECESSÁRIO)
         const firebaseConfig = {
-            apiKey: "AIzaSyCfkSKF1_aQBBmBBWwulhzTOURaV57moIA",
-            authDomain: "sample-firebase-ai-app-c92d7.firebaseapp.com",
-            projectId: "sample-firebase-ai-app-c92d7",
-            storageBucket: "sample-firebase-ai-app-c92d7.appspot.com", // Verifique se o .appspot.com está correto para storageBucket
-            messagingSenderId: "322264041699",
-            appId: "1:322264041699:web:ca6fcf0ec49f4dc9b95dd6"
+        apiKey: "AIzaSyCfkSKF1_aQBBmBBWwulhzTOURaV57moIA",
+        authDomain: "sample-firebase-ai-app-c92d7.firebaseapp.com",
+        projectId: "sample-firebase-ai-app-c92d7",
+        storageBucket: "sample-firebase-ai-app-c92d7.appspot.com", // Verifique se o .appspot.com está correto para storageBucket
+        messagingSenderId: "322264041699",
+        appId: "1:322264041699:web:ca6fcf0ec49f4dc9b95dd6"
         };
 
 
-        const appIdGlobal = typeof __app_id !== 'undefined' ? __app_id : 'default-trilha-edu-app';
+        const appIdGlobal = typeof __app_id !== 'undefined' ? __app_id : 'default-trilha-edu-project-app';
 
         // Inicializa o Firebase
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        setLogLevel('debug'); 
+        setLogLevel('error'); // 'debug' para mais detalhes, 'error' para menos
 
         let currentUserId = null;
         let currentUserEmail = null;
-        let logs = [];
+        
+        // Dados de Treinamentos
+        let trainingLogs = [];
         let registeredCourses = [];
-        let unsubscribeLogs = null; // Para cancelar o listener do onSnapshot
+        let unsubscribeTrainingLogs = null;
 
-        // Referências de elementos do DOM
-        const addLogButton = document.getElementById('add-log-button');
-        const logModal = document.getElementById('log-modal');
-        const cancelLogButton = document.getElementById('cancel-log-button');
-        const logForm = document.getElementById('log-form');
-        const logList = document.getElementById('log-list');
-        const totalHoursDisplay = document.getElementById('total-hours');
-        const dateInput = document.getElementById('date');
-        const exportTxtButton = document.getElementById('export-txt-button');
-        const exportExcelButton = document.getElementById('export-excel-button');
-        const courseSuggestionsDatalist = document.getElementById('course-suggestions');
-        const manageCoursesButton = document.getElementById('manage-courses-button');
-        const manageCoursesModal = document.getElementById('manage-courses-modal');
-        const closeManageCoursesButton = document.getElementById('close-manage-courses-button');
-        const addCourseForm = document.getElementById('add-course-form');
-        const newCourseNameInput = document.getElementById('new-course-name');
-        const registeredCoursesList = document.getElementById('registered-courses-list');
-        const timerDisplay = document.getElementById('timer-display');
-        const startTimerButton = document.getElementById('start-timer');
-        const pauseTimerButton = document.getElementById('pause-timer');
-        const resetTimerButton = document.getElementById('reset-timer');
-        const applyTimerButton = document.getElementById('apply-timer');
-        
-        // Elementos de Autenticação
-        const authControlsLoggedIn = document.getElementById('auth-controls-logged-in');
-        const authControlsLoggedOut = document.getElementById('auth-controls-logged-out');
-        const openAuthModalButton = document.getElementById('open-auth-modal-button');
-        const logoutButton = document.getElementById('logout-button');
-        const userEmailDisplay = document.getElementById('user-email-display');
-        const userIdDisplayInfo = document.getElementById('user-id-display-info'); // Renomeado para evitar conflito
-        const authModal = document.getElementById('auth-modal');
-        const authForm = document.getElementById('auth-form');
-        const authEmailInput = document.getElementById('auth-email');
-        const authPasswordInput = document.getElementById('auth-password');
-        const loginButton = document.getElementById('login-button');
-        const registerButton = document.getElementById('register-button');
-        const cancelAuthButton = document.getElementById('cancel-auth-button');
-        const authErrorMessage = document.getElementById('auth-error-message');
+        // Dados de Atividades de Projeto
+        let projectActivities = [];
+        let registeredProjects = [];
+        let unsubscribeProjectActivities = null;
 
-        let timerInterval;
-        let timerSeconds = 0;
-        let timerRunning = false;
+        let currentView = 'trainings'; // 'trainings' ou 'projects'
+
+        // --- Cache de Elementos DOM ---
+        const DOMElements = {
+            // Navegação
+            navTrainingsButton: document.getElementById('nav-trainings'),
+            navProjectsButton: document.getElementById('nav-projects'),
+            trainingsSection: document.getElementById('trainings-section'),
+            projectsSection: document.getElementById('projects-section'),
+            // Geral
+            addGlobalButton: document.getElementById('add-global-button'),
+            // Autenticação
+            authControlsLoggedIn: document.getElementById('auth-controls-logged-in'),
+            authControlsLoggedOut: document.getElementById('auth-controls-logged-out'),
+            openAuthModalButton: document.getElementById('open-auth-modal-button'),
+            logoutButton: document.getElementById('logout-button'),
+            userEmailDisplay: document.getElementById('user-email-display'),
+            userIdDisplayInfo: document.getElementById('user-id-display-info'),
+            authModal: document.getElementById('auth-modal'),
+            authForm: document.getElementById('auth-form'),
+            authEmailInput: document.getElementById('auth-email'),
+            authPasswordInput: document.getElementById('auth-password'),
+            loginButton: document.getElementById('login-button'),
+            registerButton: document.getElementById('register-button'),
+            cancelAuthButton: document.getElementById('cancel-auth-button'),
+            authErrorMessage: document.getElementById('auth-error-message'),
+            // Treinamentos
+            totalHoursDisplay: document.getElementById('total-training-hours'),
+            trainingLogModal: document.getElementById('training-log-modal'),
+            cancelTrainingLogButton: document.getElementById('cancel-training-log-button'),
+            trainingLogForm: document.getElementById('training-log-form'),
+            trainingLogList: document.getElementById('training-log-list'),
+            trainingDateInput: document.getElementById('training-date'),
+            trainingCourseSuggestions: document.getElementById('training-course-suggestions'),
+            manageCoursesButton: document.getElementById('manage-courses-button'),
+            manageCoursesModal: document.getElementById('manage-courses-modal'),
+            closeManageCoursesButton: document.getElementById('close-manage-courses-button'),
+            addCourseForm: document.getElementById('add-course-form'),
+            newCourseNameInput: document.getElementById('new-course-name'),
+            registeredCoursesList: document.getElementById('registered-courses-list'),
+            exportTxtTrainingsButton: document.getElementById('export-txt-trainings-button'),
+            exportExcelTrainingsButton: document.getElementById('export-excel-trainings-button'),
+            // Projetos
+            projectActivityModal: document.getElementById('project-activity-modal'),
+            cancelProjectActivityButton: document.getElementById('cancel-project-activity-button'),
+            projectActivityForm: document.getElementById('project-activity-form'),
+            projectActivityList: document.getElementById('project-activity-list'),
+            projectActivityDateInput: document.getElementById('project-activity-date'),
+            projectSuggestions: document.getElementById('project-suggestions'),
+            manageProjectsButton: document.getElementById('manage-projects-button'),
+            manageProjectsModal: document.getElementById('manage-projects-modal'),
+            closeManageProjectsButton: document.getElementById('close-manage-projects-button'),
+            addProjectForm: document.getElementById('add-project-form'),
+            newProjectNameInput: document.getElementById('new-project-name'),
+            registeredProjectsList: document.getElementById('registered-projects-list'),
+            exportTxtProjectsButton: document.getElementById('export-txt-projects-button'),
+            exportExcelProjectsButton: document.getElementById('export-excel-projects-button'),
+            // Cronômetro (compartilhado, mas instâncias separadas nos modais)
+            trainingTimerDisplay: document.getElementById('training-timer-display'),
+            trainingStartTimer: document.getElementById('training-start-timer'),
+            trainingPauseTimer: document.getElementById('training-pause-timer'),
+            trainingResetTimer: document.getElementById('training-reset-timer'),
+            trainingApplyTimer: document.getElementById('training-apply-timer'),
+            projectTimerDisplay: document.getElementById('project-timer-display'),
+            projectStartTimer: document.getElementById('project-start-timer'),
+            projectPauseTimer: document.getElementById('project-pause-timer'),
+            projectResetTimer: document.getElementById('project-reset-timer'),
+            projectApplyTimer: document.getElementById('project-apply-timer'),
+        };
         
+        // Variáveis do Cronômetro (precisam ser específicas para cada modal se abertos simultaneamente, ou resetadas)
+        // Para simplificar, vamos assumir um cronômetro ativo por vez, resetado ao abrir o modal.
+        let activeTimerInterval;
+        let activeTimerSeconds = 0;
+        let activeTimerRunning = false;
+        let activeTimerDisplayElement;
+        let activeTimerHoursElementId;
+        let activeTimerMinutesElementId;
+
+
+        // --- Navegação de Abas ---
+        function switchView(view) {
+            currentView = view;
+            DOMElements.trainingsSection.style.display = view === 'trainings' ? 'block' : 'none';
+            DOMElements.projectsSection.style.display = view === 'projects' ? 'block' : 'none';
+            DOMElements.navTrainingsButton.classList.toggle('active', view === 'trainings');
+            DOMElements.navProjectsButton.classList.toggle('active', view === 'projects');
+            // Atualizar o comportamento do botão "+" global se necessário
+        }
+        DOMElements.navTrainingsButton.addEventListener('click', () => switchView('trainings'));
+        DOMElements.navProjectsButton.addEventListener('click', () => switchView('projects'));
+
+
         // --- Autenticação ---
         onAuthStateChanged(auth, async (user) => {
-            if (user) { // Usuário está logado
-                currentUserId = user.uid;
-                currentUserEmail = user.email;
-
-                userEmailDisplay.textContent = currentUserEmail ? `Logado como: ${currentUserEmail}` : 'Logado';
-                userIdDisplayInfo.textContent = `ID: ${currentUserId}`;
-                
-                authControlsLoggedIn.style.display = 'flex';
-                authControlsLoggedOut.style.display = 'none';
+            if (user) { 
+                currentUserId = user.uid; currentUserEmail = user.email;
+                DOMElements.userEmailDisplay.textContent = currentUserEmail ? `Logado: ${currentUserEmail}` : 'Logado';
+                DOMElements.userIdDisplayInfo.textContent = `ID: ${currentUserId}`;
+                DOMElements.authControlsLoggedIn.style.display = 'flex';
+                DOMElements.authControlsLoggedOut.style.display = 'none';
                 closeAuthModal(); 
-
-                await loadUserData();
-            } else { // Usuário está deslogado
-                currentUserId = null;
-                currentUserEmail = null;
-
-                userEmailDisplay.textContent = '';
-                userIdDisplayInfo.textContent = "Não autenticado";
-                
-                authControlsLoggedIn.style.display = 'none';
-                authControlsLoggedOut.style.display = 'block';
-
-                if (unsubscribeLogs) {
-                    unsubscribeLogs();
-                    unsubscribeLogs = null;
-                }
-                logs = [];
-                registeredCourses = [];
-                renderLogs();
-                renderRegisteredCourses();
-                populateCourseSuggestions();
-                updateTotalHours();
+                await loadAllUserData();
+            } else { 
+                currentUserId = null; currentUserEmail = null;
+                DOMElements.userEmailDisplay.textContent = '';
+                DOMElements.userIdDisplayInfo.textContent = "Não autenticado";
+                DOMElements.authControlsLoggedIn.style.display = 'none';
+                DOMElements.authControlsLoggedOut.style.display = 'block';
+                clearAllLocalDataAndListeners();
             }
         });
-        
-        async function loadUserData() {
+
+        async function loadAllUserData() {
             if (!currentUserId) return;
-
-            if (unsubscribeLogs) { // Cancela listener anterior se existir
-                unsubscribeLogs();
-                unsubscribeLogs = null;
-            }
-
-            // Carregar Cursos
-            const coursesDocRef = doc(db, `artifacts/${appIdGlobal}/users/${currentUserId}/courseSettings`, "myCourses");
-            try {
-                const coursesDocSnap = await getDoc(coursesDocRef);
-                if (coursesDocSnap.exists() && coursesDocSnap.data().names) {
-                    registeredCourses = coursesDocSnap.data().names;
-                } else {
-                    registeredCourses = [];
-                }
-            } catch (error) {
-                console.error("Erro ao carregar cursos: ", error);
-                registeredCourses = [];
-            }
-            renderRegisteredCourses();
-            populateCourseSuggestions();
-
-            // Carregar Logs (com onSnapshot para tempo real)
-            const logsCollectionRef = collection(db, `artifacts/${appIdGlobal}/users/${currentUserId}/trainingLogs`);
-            unsubscribeLogs = onSnapshot(logsCollectionRef, (querySnapshot) => {
-                logs = [];
-                querySnapshot.forEach((doc) => {
-                    logs.push({ id: doc.id, ...doc.data() });
-                });
-                logs.sort((a, b) => {
-                    const dateA = a.date ? new Date(a.date) : 0;
-                    const dateB = b.date ? new Date(b.date) : 0;
-                    return dateB - dateA;
-                });
-                renderLogs();
-                updateTotalHours();
-            }, (error) => {
-                console.error("Erro ao carregar logs: ", error);
-            });
+            await loadRegisteredCourses();
+            await loadTrainingLogs();
+            await loadRegisteredProjects();
+            await loadProjectActivities();
         }
 
-        // --- Modais (Login/Registro, Logs, Gerenciar Cursos) ---
-        const openAuthModal = () => { authModal.style.display = 'flex'; authEmailInput.focus(); authErrorMessage.textContent = ''; }
-        const closeAuthModal = () => { authModal.style.display = 'none'; authForm.reset(); authErrorMessage.textContent = ''; }
-        openAuthModalButton.addEventListener('click', openAuthModal);
-        cancelAuthButton.addEventListener('click', closeAuthModal);
-
-        const openLogModal = () => { 
-            if (!currentUserId) { alert("Você precisa estar logado para adicionar registros."); return; }
-            logModal.style.display = 'flex'; populateCourseSuggestions(); document.getElementById('description').focus(); resetTimer(); 
+        function clearAllLocalDataAndListeners() {
+            if (unsubscribeTrainingLogs) unsubscribeTrainingLogs(); unsubscribeTrainingLogs = null;
+            if (unsubscribeProjectActivities) unsubscribeProjectActivities(); unsubscribeProjectActivities = null;
+            trainingLogs = []; registeredCourses = []; projectActivities = []; registeredProjects = [];
+            renderTrainingLogs(); renderRegisteredCourses(); populateCourseSuggestions(); updateTotalTrainingHours();
+            renderProjectActivities(); renderRegisteredProjects(); populateProjectSuggestions(); /* updateTotalProjectHours(); */
         }
-        const closeLogModal = () => { logModal.style.display = 'none'; logForm.reset(); resetTimer(); }
-        addLogButton.addEventListener('click', openLogModal);
-        cancelLogButton.addEventListener('click', closeLogModal);
-
-        const openManageCoursesModal = () => { 
-            if (!currentUserId) { alert("Você precisa estar logado para gerenciar cursos."); return; }
-            manageCoursesModal.style.display = 'flex'; renderRegisteredCourses(); newCourseNameInput.focus(); 
-        }
-        const closeManageCoursesModal = () => { manageCoursesModal.style.display = 'none'; addCourseForm.reset(); }
-        manageCoursesButton.addEventListener('click', openManageCoursesModal);
-        closeManageCoursesButton.addEventListener('click', closeManageCoursesModal);
         
+        // --- Modais de Autenticação, Log, Gerenciamento (geral) ---
+        const openAuthModal = () => { DOMElements.authModal.style.display = 'flex'; DOMElements.authEmailInput.focus(); DOMElements.authErrorMessage.textContent = ''; }
+        const closeAuthModal = () => { DOMElements.authModal.style.display = 'none'; DOMElements.authForm.reset(); DOMElements.authErrorMessage.textContent = ''; }
+        DOMElements.openAuthModalButton.addEventListener('click', openAuthModal);
+        DOMElements.cancelAuthButton.addEventListener('click', closeAuthModal);
+
+        DOMElements.addGlobalButton.addEventListener('click', () => {
+            if (!currentUserId) { alert("Você precisa estar logado para adicionar registros."); return; }
+            if (currentView === 'trainings') openTrainingLogModal();
+            else if (currentView === 'projects') openProjectActivityModal();
+        });
+
+        // Lógica de Login/Registro (igual à v4)
+        DOMElements.loginButton.addEventListener('click', async () => { /* ... código v4 ... */ 
+            const email = DOMElements.authEmailInput.value; const password = DOMElements.authPasswordInput.value;
+            DOMElements.authErrorMessage.textContent = '';
+            try { await signInWithEmailAndPassword(auth, email, password); } 
+            catch (error) { console.error("Erro login:", error); DOMElements.authErrorMessage.textContent = `Erro: ${error.message}`; }
+        });
+        DOMElements.registerButton.addEventListener('click', async () => { /* ... código v4 ... */ 
+            const email = DOMElements.authEmailInput.value; const password = DOMElements.authPasswordInput.value;
+            DOMElements.authErrorMessage.textContent = '';
+            try { await createUserWithEmailAndPassword(auth, email, password); } 
+            catch (error) { console.error("Erro registro:", error); DOMElements.authErrorMessage.textContent = `Erro: ${error.message}`; }
+        });
+        DOMElements.logoutButton.addEventListener('click', async () => { /* ... código v4 ... */ 
+            try { await signOut(auth); } 
+            catch (error) { console.error("Erro logout:", error); alert(`Erro: ${error.message}`); }
+        });
+
         window.addEventListener('click', (event) => {
-            if (event.target === logModal) closeLogModal();
-            if (event.target === manageCoursesModal) closeManageCoursesModal();
-            if (event.target === authModal) closeAuthModal();
+            if (event.target === DOMElements.trainingLogModal) closeTrainingLogModal();
+            if (event.target === DOMElements.manageCoursesModal) closeManageCoursesModal();
+            if (event.target === DOMElements.authModal) closeAuthModal();
+            if (event.target === DOMElements.projectActivityModal) closeProjectActivityModal();
+            if (event.target === DOMElements.manageProjectsModal) closeManageProjectsModal();
         });
         window.addEventListener('keydown', (event) => {
             if (event.key === 'Escape') {
-                if (logModal.style.display === 'flex') closeLogModal();
-                if (manageCoursesModal.style.display === 'flex') closeManageCoursesModal();
-                if (authModal.style.display === 'flex') closeAuthModal();
+                if (DOMElements.trainingLogModal.style.display === 'flex') closeTrainingLogModal();
+                if (DOMElements.manageCoursesModal.style.display === 'flex') closeManageCoursesModal();
+                if (DOMElements.authModal.style.display === 'flex') closeAuthModal();
+                if (DOMElements.projectActivityModal.style.display === 'flex') closeProjectActivityModal();
+                if (DOMElements.manageProjectsModal.style.display === 'flex') closeManageProjectsModal();
             }
         });
 
-        // --- Lógica de Autenticação (Email/Senha) ---
-        loginButton.addEventListener('click', async () => {
-            const email = authEmailInput.value;
-            const password = authPasswordInput.value;
-            authErrorMessage.textContent = '';
-            try {
-                await signInWithEmailAndPassword(auth, email, password);
-                // onAuthStateChanged tratará o resto
-            } catch (error) {
-                console.error("Erro no login:", error);
-                authErrorMessage.textContent = `Erro no login: ${error.message}`;
-            }
-        });
+        // --- Cronômetro Genérico ---
+        function setupTimer(displayElem, hoursId, minutesId, startBtn, pauseBtn, resetBtn, applyBtn) {
+            activeTimerDisplayElement = displayElem;
+            activeTimerHoursElementId = hoursId;
+            activeTimerMinutesElementId = minutesId;
 
-        registerButton.addEventListener('click', async () => {
-            const email = authEmailInput.value;
-            const password = authPasswordInput.value;
-            authErrorMessage.textContent = '';
-            try {
-                await createUserWithEmailAndPassword(auth, email, password);
-                // onAuthStateChanged tratará o resto
-            } catch (error) {
-                console.error("Erro no registro:", error);
-                authErrorMessage.textContent = `Erro no registro: ${error.message}`;
+            function formatActiveTime(totalSeconds) { /* ... igual à v4 ... */ 
+                const h = Math.floor(totalSeconds / 3600); const m = Math.floor((totalSeconds % 3600) / 60); const s = totalSeconds % 60;
+                return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
             }
-        });
-
-        logoutButton.addEventListener('click', async () => {
-            try {
-                await signOut(auth);
-                // onAuthStateChanged tratará a limpeza de dados e UI
-            } catch (error) {
-                console.error("Erro no logout:", error);
-                alert(`Erro no logout: ${error.message}`);
+            function updateActiveTimerDisplay() { activeTimerDisplayElement.textContent = formatActiveTime(activeTimerSeconds); }
+            
+            startBtn.onclick = () => {
+                if (!activeTimerRunning) {
+                    activeTimerRunning = true; startBtn.disabled = true; pauseBtn.disabled = false;
+                    activeTimerInterval = setInterval(() => { activeTimerSeconds++; updateActiveTimerDisplay(); }, 1000);
+                }
+            };
+            pauseBtn.onclick = () => {
+                if (activeTimerRunning) {
+                    activeTimerRunning = false; startBtn.disabled = false; pauseBtn.disabled = true;
+                    clearInterval(activeTimerInterval);
+                }
+            };
+            function resetActiveTimerInternal() {
+                activeTimerRunning = false; clearInterval(activeTimerInterval); activeTimerSeconds = 0; updateActiveTimerDisplay();
+                startBtn.disabled = false; pauseBtn.disabled = true;
             }
-        });
-
-
-        // --- Gerenciamento de Cursos (Firestore) ---
-        async function renderRegisteredCourses() {
-            registeredCoursesList.innerHTML = '';
-            if (registeredCourses.length === 0) {
-                registeredCoursesList.innerHTML = '<li class="empty-list-message">Nenhum curso cadastrado.</li>';
-                return;
-            }
-            const sortedCourses = [...registeredCourses].sort((a,b) => a.localeCompare(b));
-            sortedCourses.forEach(course => {
-                const listItem = document.createElement('li');
-                listItem.classList.add('registered-course-item');
-                listItem.textContent = course;
-                const removeButton = document.createElement('button');
-                removeButton.classList.add('remove-course-button');
-                removeButton.textContent = 'Remover';
-                removeButton.addEventListener('click', async () => await removeCourse(course));
-                listItem.appendChild(removeButton);
-                registeredCoursesList.appendChild(listItem);
-            });
+            resetBtn.onclick = resetActiveTimerInternal;
+            applyBtn.onclick = () => {
+                const h = Math.floor(activeTimerSeconds / 3600);
+                const m = Math.floor((activeTimerSeconds % 3600) / 60);
+                document.getElementById(activeTimerHoursElementId).value = h > 0 ? h : '';
+                document.getElementById(activeTimerMinutesElementId).value = m > 0 ? m : '';
+                if (h === 0 && m === 0 && activeTimerSeconds > 0) { document.getElementById(activeTimerMinutesElementId).value = 1; }
+            };
+            return resetActiveTimerInternal; // Retorna a função de reset para ser chamada ao abrir o modal
         }
 
-        async function saveCoursesToFirestore() {
+        const resetTrainingTimer = setupTimer(DOMElements.trainingTimerDisplay, 'training-hours', 'training-minutes', DOMElements.trainingStartTimer, DOMElements.trainingPauseTimer, DOMElements.trainingResetTimer, DOMElements.trainingApplyTimer);
+        const resetProjectTimer = setupTimer(DOMElements.projectTimerDisplay, 'project-activity-hours', 'project-activity-minutes', DOMElements.projectStartTimer, DOMElements.projectPauseTimer, DOMElements.projectResetTimer, DOMElements.projectApplyTimer);
+
+        // --- Lógica de TREINAMENTOS ---
+        // Modais de Treinamento
+        const openTrainingLogModal = () => { DOMElements.trainingLogModal.style.display = 'flex'; populateCourseSuggestions(); DOMElements.trainingLogForm.elements['description'].focus(); resetTrainingTimer(); }
+        const closeTrainingLogModal = () => { DOMElements.trainingLogModal.style.display = 'none'; DOMElements.trainingLogForm.reset(); resetTrainingTimer(); }
+        DOMElements.cancelTrainingLogButton.addEventListener('click', closeTrainingLogModal);
+
+        const openManageCoursesModal = () => { DOMElements.manageCoursesModal.style.display = 'flex'; renderRegisteredCourses(); DOMElements.newCourseNameInput.focus(); }
+        const closeManageCoursesModal = () => { DOMElements.manageCoursesModal.style.display = 'none'; DOMElements.addCourseForm.reset(); }
+        DOMElements.manageCoursesButton.addEventListener('click', openManageCoursesModal);
+        DOMElements.closeManageCoursesButton.addEventListener('click', closeManageCoursesModal);
+
+        // Gerenciamento de Cursos
+        async function loadRegisteredCourses() { /* ... igual à v4, mas com path correto ... */ 
             if (!currentUserId) return;
             const coursesDocRef = doc(db, `artifacts/${appIdGlobal}/users/${currentUserId}/courseSettings`, "myCourses");
-            try {
-                await setDoc(coursesDocRef, { names: registeredCourses });
-            } catch (error) {
-                console.error("Erro ao salvar cursos: ", error);
-            }
+            try { const coursesDocSnap = await getDoc(coursesDocRef);
+                if (coursesDocSnap.exists() && coursesDocSnap.data().names) registeredCourses = coursesDocSnap.data().names;
+                else registeredCourses = [];
+            } catch (e) { console.error("Erro load cursos:",e); registeredCourses = [];}
+            renderRegisteredCourses(); populateCourseSuggestions();
         }
-
-        async function addCourse(courseName) {
-            if (courseName && !registeredCourses.includes(courseName)) {
-                registeredCourses.push(courseName);
-                await saveCoursesToFirestore();
-                renderRegisteredCourses();
-                populateCourseSuggestions();
-            }
-        }
-
-        async function removeCourse(courseName) {
-            registeredCourses = registeredCourses.filter(course => course !== courseName);
-            await saveCoursesToFirestore();
-            renderRegisteredCourses();
-            populateCourseSuggestions();
-        }
-
-        addCourseForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const courseName = newCourseNameInput.value.trim();
-            if (courseName) {
-                await addCourse(courseName);
-                newCourseNameInput.value = '';
-            } else {
-                alert("Por favor, digite um nome para o curso.");
-            }
-        });
-
-        function populateCourseSuggestions() {
-            courseSuggestionsDatalist.innerHTML = '';
-            const sortedCourses = [...registeredCourses].sort((a,b) => a.localeCompare(b));
-            sortedCourses.forEach(course => {
-                const option = document.createElement('option');
-                option.value = course;
-                courseSuggestionsDatalist.appendChild(option);
+        function renderRegisteredCourses() { /* ... igual à v4, mas usando DOMElements ... */ 
+            DOMElements.registeredCoursesList.innerHTML = '';
+            if (registeredCourses.length === 0) { DOMElements.registeredCoursesList.innerHTML = '<li class="empty-list-message">Nenhum curso.</li>'; return; }
+            const sorted = [...registeredCourses].sort((a,b)=>a.localeCompare(b));
+            sorted.forEach(c => { 
+                const li = document.createElement('li'); li.className = 'registered-course-item'; li.textContent=c;
+                const btn = document.createElement('button'); btn.className='remove-item-button'; btn.textContent='Remover';
+                btn.onclick = async () => await removeCourse(c);
+                li.appendChild(btn); DOMElements.registeredCoursesList.appendChild(li);
             });
         }
-
-        // --- Cronômetro ---
-        function formatTime(totalSeconds) {
-            const h = Math.floor(totalSeconds / 3600);
-            const m = Math.floor((totalSeconds % 3600) / 60);
-            const s = totalSeconds % 60;
-            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        async function saveCoursesToFirestore() { /* ... igual à v4 ... */ 
+            if(!currentUserId)return;
+            const ref = doc(db, `artifacts/${appIdGlobal}/users/${currentUserId}/courseSettings`, "myCourses");
+            try { await setDoc(ref, {names: registeredCourses}); } catch(e){console.error("Erro save cursos:", e);}
         }
-        function updateTimerDisplay() { timerDisplay.textContent = formatTime(timerSeconds); }
-        startTimerButton.addEventListener('click', () => {
-            if (!timerRunning) {
-                timerRunning = true; startTimerButton.disabled = true; pauseTimerButton.disabled = false;
-                timerInterval = setInterval(() => { timerSeconds++; updateTimerDisplay(); }, 1000);
-            }
-        });
-        pauseTimerButton.addEventListener('click', () => {
-            if (timerRunning) {
-                timerRunning = false; startTimerButton.disabled = false; pauseTimerButton.disabled = true;
-                clearInterval(timerInterval);
-            }
-        });
-        function resetTimer() {
-            timerRunning = false; clearInterval(timerInterval); timerSeconds = 0; updateTimerDisplay();
-            startTimerButton.disabled = false; pauseTimerButton.disabled = true;
+        async function addCourse(name) { /* ... igual à v4 ... */ if(name&&!registeredCourses.includes(name)){registeredCourses.push(name); await saveCoursesToFirestore();renderRegisteredCourses();populateCourseSuggestions();} }
+        async function removeCourse(name) { /* ... igual à v4 ... */ registeredCourses=registeredCourses.filter(c=>c!==name); await saveCoursesToFirestore();renderRegisteredCourses();populateCourseSuggestions();}
+        DOMElements.addCourseForm.addEventListener('submit', async (e) => { e.preventDefault(); const n=DOMElements.newCourseNameInput.value.trim(); if(n)await addCourse(n); DOMElements.newCourseNameInput.value='';});
+        function populateCourseSuggestions() { /* ... igual à v4, mas usando DOMElements ... */ 
+            DOMElements.trainingCourseSuggestions.innerHTML='';
+            const sorted=[...registeredCourses].sort((a,b)=>a.localeCompare(b));
+            sorted.forEach(c=>{const o=document.createElement('option');o.value=c;DOMElements.trainingCourseSuggestions.appendChild(o);});
         }
-        resetTimerButton.addEventListener('click', resetTimer);
-        applyTimerButton.addEventListener('click', () => {
-            const h = Math.floor(timerSeconds / 3600);
-            const m = Math.floor((timerSeconds % 3600) / 60);
-            document.getElementById('hours').value = h > 0 ? h : '';
-            document.getElementById('minutes').value = m > 0 ? m : '';
-            if (h === 0 && m === 0 && timerSeconds > 0) { document.getElementById('minutes').value = 1; }
+        
+        // Registro de Horas de Treinamento
+        async function loadTrainingLogs() { /* ... igual à v4, mas com path e listener corretos ... */ 
+            if (!currentUserId) return;
+            if (unsubscribeTrainingLogs) unsubscribeTrainingLogs();
+            const logsRef = collection(db, `artifacts/${appIdGlobal}/users/${currentUserId}/trainingLogs`);
+            unsubscribeTrainingLogs = onSnapshot(logsRef, snap => {
+                trainingLogs = []; snap.forEach(d => trainingLogs.push({id:d.id, ...d.data()}));
+                trainingLogs.sort((a,b) => (b.date && a.date) ? new Date(b.date) - new Date(a.date) : 0);
+                renderTrainingLogs(); updateTotalTrainingHours();
+            }, e => console.error("Erro load logs treino:", e));
+        }
+        DOMElements.trainingLogForm.addEventListener('submit', async (e) => { /* ... igual à v4 ... */ 
+            e.preventDefault(); if(!currentUserId)return;
+            const desc=DOMElements.trainingLogForm.elements['description'].value; const dateVal=DOMElements.trainingLogForm.elements['training-date'].value;
+            const h=parseInt(DOMElements.trainingLogForm.elements['training-hours'].value)||0; const m=parseInt(DOMElements.trainingLogForm.elements['training-minutes'].value)||0;
+            const status=DOMElements.trainingLogForm.elements['status'].value;
+            const dateObj=new Date(dateVal+'T00:00:00'); const day=dateObj.getDay();
+            if(day===0||day===6){alert('Dias úteis (Seg-Sex).');return;} if(desc.trim()===''){alert('Descrição.');return;} if(h===0&&m===0){alert('Duração.');return;}
+            const totalM=(h*60)+m; const newData={description:desc,date:dateVal,totalMinutes:totalM,status,createdAt:serverTimestamp()};
+            try{const ref=collection(db, `artifacts/${appIdGlobal}/users/${currentUserId}/trainingLogs`); await addDoc(ref,newData);closeTrainingLogModal();}
+            catch(er){console.error("Erro add log treino:",er);alert("Erro ao salvar.");}
         });
+        function renderTrainingLogs() { /* ... igual à v4, mas usando DOMElements ... */ 
+            DOMElements.trainingLogList.innerHTML = '';
+            if (trainingLogs.length === 0) { DOMElements.trainingLogList.innerHTML = '<li class="empty-list-message">Nenhum treino.</li>'; return; }
+            trainingLogs.forEach(log => { /* ... HTML igual à v4 ... */ 
+                const li = document.createElement('li'); li.className='log-item';
+                let fDate="Inválida",dName="";
+                if(log.date&&typeof log.date==='string'){try{const dO=new Date(log.date+'T00:00:00');if(!isNaN(dO)){fDate=dO.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'});dName=dO.toLocaleDateString('pt-BR',{weekday:'long'});}}catch(e){}}
+                else if(log.date&&log.date.toDate){try{const dO=log.date.toDate();fDate=dO.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'});dName=dO.toLocaleDateString('pt-BR',{weekday:'long'});}catch(e){}}
+                const h=Math.floor(log.totalMinutes/60); const m=log.totalMinutes%60; const sT=log.status==='concluido'?'Concluído':'Não Concluído';
+                li.innerHTML = `<div class="info"><div class="description">${escapeHTML(log.description)}</div><div class="date">${fDate} (<span class="day-name">${dName}</span>)</div><div class="status ${log.status}">${sT}</div></div><div class="duration">${h}h ${m}m</div>`;
+                DOMElements.trainingLogList.appendChild(li);
+            });
+        }
+        function updateTotalTrainingHours() { /* ... igual à v4, mas usando DOMElements ... */ 
+            const totalM=trainingLogs.reduce((s,l)=>s+l.totalMinutes,0); const h=Math.floor(totalM/60); const m=totalM%60;
+            DOMElements.totalHoursDisplay.textContent=`${h}h ${m}m`;
+        }
+        
+        // --- Lógica de ATIVIDADES DE PROJETO ---
+        // Modais de Atividades de Projeto
+        const openProjectActivityModal = () => { DOMElements.projectActivityModal.style.display = 'flex'; populateProjectSuggestions(); DOMElements.projectActivityForm.elements['project-name'].focus(); resetProjectTimer(); }
+        const closeProjectActivityModal = () => { DOMElements.projectActivityModal.style.display = 'none'; DOMElements.projectActivityForm.reset(); resetProjectTimer(); }
+        DOMElements.cancelProjectActivityButton.addEventListener('click', closeProjectActivityModal);
 
-        // --- Registro de Horas (Firestore) ---
-        logForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            if (!currentUserId) { alert("Autenticação necessária."); return; }
+        const openManageProjectsModal = () => { DOMElements.manageProjectsModal.style.display = 'flex'; renderRegisteredProjects(); DOMElements.newProjectNameInput.focus(); }
+        const closeManageProjectsModal = () => { DOMElements.manageProjectsModal.style.display = 'none'; DOMElements.addProjectForm.reset(); }
+        DOMElements.manageProjectsButton.addEventListener('click', openManageProjectsModal);
+        DOMElements.closeManageProjectsButton.addEventListener('click', closeManageProjectsModal);
 
-            const description = document.getElementById('description').value;
-            const dateValue = document.getElementById('date').value;
-            const hours = parseInt(document.getElementById('hours').value) || 0;
-            const minutes = parseInt(document.getElementById('minutes').value) || 0;
-            const status = document.getElementById('status').value;
-            
+        // Gerenciamento de Nomes de Projetos
+        async function loadRegisteredProjects() {
+            if (!currentUserId) return;
+            const projectsDocRef = doc(db, `artifacts/${appIdGlobal}/users/${currentUserId}/projectSettings`, "myProjects");
+            try { const projectsDocSnap = await getDoc(projectsDocRef);
+                if (projectsDocSnap.exists() && projectsDocSnap.data().names) registeredProjects = projectsDocSnap.data().names;
+                else registeredProjects = [];
+            } catch (e) { console.error("Erro load projetos:",e); registeredProjects = [];}
+            renderRegisteredProjects(); populateProjectSuggestions();
+        }
+        function renderRegisteredProjects() {
+            DOMElements.registeredProjectsList.innerHTML = '';
+            if (registeredProjects.length === 0) { DOMElements.registeredProjectsList.innerHTML = '<li class="empty-list-message">Nenhum projeto.</li>'; return; }
+            const sorted = [...registeredProjects].sort((a,b)=>a.localeCompare(b));
+            sorted.forEach(p => { 
+                const li = document.createElement('li'); li.className = 'registered-course-item'; /* Reutiliza classe */ li.textContent=p;
+                const btn = document.createElement('button'); btn.className='remove-item-button'; btn.textContent='Remover';
+                btn.onclick = async () => await removeProject(p);
+                li.appendChild(btn); DOMElements.registeredProjectsList.appendChild(li);
+            });
+        }
+        async function saveProjectsToFirestore() {
+            if(!currentUserId)return;
+            const ref = doc(db, `artifacts/${appIdGlobal}/users/${currentUserId}/projectSettings`, "myProjects");
+            try { await setDoc(ref, {names: registeredProjects}); } catch(e){console.error("Erro save projetos:", e);}
+        }
+        async function addProject(name) { if(name&&!registeredProjects.includes(name)){registeredProjects.push(name); await saveProjectsToFirestore();renderRegisteredProjects();populateProjectSuggestions();} }
+        async function removeProject(name) { registeredProjects=registeredProjects.filter(p=>p!==name); await saveProjectsToFirestore();renderRegisteredProjects();populateProjectSuggestions();}
+        DOMElements.addProjectForm.addEventListener('submit', async (e) => { e.preventDefault(); const n=DOMElements.newProjectNameInput.value.trim(); if(n)await addProject(n); DOMElements.newProjectNameInput.value='';});
+        function populateProjectSuggestions() {
+            DOMElements.projectSuggestions.innerHTML='';
+            const sorted=[...registeredProjects].sort((a,b)=>a.localeCompare(b));
+            sorted.forEach(p=>{const o=document.createElement('option');o.value=p;DOMElements.projectSuggestions.appendChild(o);});
+        }
+
+        // Registro de Atividades de Projeto
+        async function loadProjectActivities() {
+            if (!currentUserId) return;
+            if (unsubscribeProjectActivities) unsubscribeProjectActivities();
+            const actRef = collection(db, `artifacts/${appIdGlobal}/users/${currentUserId}/projectActivities`);
+            unsubscribeProjectActivities = onSnapshot(actRef, snap => {
+                projectActivities = []; snap.forEach(d => projectActivities.push({id:d.id, ...d.data()}));
+                projectActivities.sort((a,b) => (b.date && a.date) ? new Date(b.date) - new Date(a.date) : 0); // Mais recentes primeiro
+                renderProjectActivities(); /* updateTotalProjectHours(); */ // TODO: totalizador para projetos
+            }, e => console.error("Erro load atividades proj:", e));
+        }
+        DOMElements.projectActivityForm.addEventListener('submit', async (e) => {
+            e.preventDefault(); if(!currentUserId)return;
+            const form = DOMElements.projectActivityForm.elements;
+            const projectName = form['project-name'].value.trim();
+            const description = form['project-activity-description'].value.trim();
+            const dateValue = form['project-activity-date'].value;
+            const hours = parseInt(form['project-activity-hours'].value) || 0;
+            const minutes = parseInt(form['project-activity-minutes'].value) || 0;
+            const activityType = form['project-activity-type'].value;
+            const activityStatus = form['project-activity-status'].value;
+            const priority = form['project-activity-priority'].value;
+
             const dateObj = new Date(dateValue + 'T00:00:00');
-            const dayOfWeek = dateObj.getDay();
+            // const dayOfWeek = dateObj.getDay(); // Não há restrição de dia útil para atividades de projeto
 
-            if (dayOfWeek === 0 || dayOfWeek === 6) { alert('Selecione dias úteis (Seg-Sex).'); return; }
-            if (description.trim() === '') { alert('Preencha a descrição.'); document.getElementById('description').focus(); return; }
-            if (hours === 0 && minutes === 0) { alert('Insira uma duração válida.'); document.getElementById('hours').focus(); return; }
+            if (projectName === '') { alert('Nome do projeto é obrigatório.'); return; }
+            if (description === '') { alert('Descrição da atividade é obrigatória.'); return; }
+            if (hours === 0 && minutes === 0) { alert('Insira uma duração válida.'); return; }
 
             const totalMinutes = (hours * 60) + minutes;
-            const newLogData = {
-                description, date: dateValue, totalMinutes, status, createdAt: serverTimestamp()
+            const newActivityData = {
+                projectName, description, date: dateValue, totalMinutes, activityType, 
+                status: activityStatus, priority, createdAt: serverTimestamp()
             };
-
             try {
-                const logsCollectionRef = collection(db, `artifacts/${appIdGlobal}/users/${currentUserId}/trainingLogs`);
-                await addDoc(logsCollectionRef, newLogData);
-                closeLogModal();
-            } catch (error) {
-                console.error("Erro ao adicionar log: ", error);
-                alert("Erro ao salvar o registro. Tente novamente.");
+                const ref = collection(db, `artifacts/${appIdGlobal}/users/${currentUserId}/projectActivities`);
+                await addDoc(ref, newActivityData);
+                closeProjectActivityModal();
+            } catch (er) {
+                console.error("Erro add atividade proj:", er);
+                alert("Erro ao salvar a atividade.");
             }
         });
-        
-        function renderLogs() {
-            logList.innerHTML = '';
-            if (logs.length === 0) {
-                logList.innerHTML = '<li class="empty-list-message">Nenhum registro. Adicione suas horas!</li>';
-            } else {
-                logs.forEach(log => {
-                    const li = document.createElement('li');
-                    li.classList.add('log-item');
-                    let formattedDate = "Data inválida"; let dayName = "";
-                    if (log.date && typeof log.date === 'string') {
-                        try {
-                            const dateObj = new Date(log.date + 'T00:00:00');
-                             if (!isNaN(dateObj)) {
-                                formattedDate = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                                dayName = dateObj.toLocaleDateString('pt-BR', { weekday: 'long' });
-                             }
-                        } catch (e) { console.warn("Erro ao formatar data do log:", log.date, e); }
-                    } else if (log.date && log.date.toDate) { 
-                         try {
-                            const dateObj = log.date.toDate();
-                            formattedDate = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                            dayName = dateObj.toLocaleDateString('pt-BR', { weekday: 'long' });
-                         } catch (e) { console.warn("Erro ao formatar timestamp do log:", log.date, e); }
-                    }
-                    const h = Math.floor(log.totalMinutes / 60);
-                    const m = log.totalMinutes % 60;
-                    const statusText = log.status === 'concluido' ? 'Concluído' : 'Não Concluído';
-                    li.innerHTML = `
-                        <div class="info">
-                            <div class="description">${escapeHTML(log.description)}</div>
-                            <div class="date">${formattedDate} (<span class="day-name">${dayName}</span>)</div>
-                            <div class="status ${log.status}">${statusText}</div>
+        function renderProjectActivities() {
+            DOMElements.projectActivityList.innerHTML = '';
+            if (projectActivities.length === 0) { DOMElements.projectActivityList.innerHTML = '<li class="empty-list-message">Nenhuma atividade de projeto.</li>'; return; }
+            projectActivities.forEach(act => {
+                const li = document.createElement('li'); li.className='log-item project-activity-item'; // Adiciona classe específica se necessário
+                let fDate="Inválida",dName="";
+                if(act.date&&typeof act.date==='string'){try{const dO=new Date(act.date+'T00:00:00');if(!isNaN(dO)){fDate=dO.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'});dName=dO.toLocaleDateString('pt-BR',{weekday:'long'});}}catch(e){}}
+                else if(act.date&&act.date.toDate){try{const dO=act.date.toDate();fDate=dO.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'});dName=dO.toLocaleDateString('pt-BR',{weekday:'long'});}catch(e){}}
+                const h=Math.floor(act.totalMinutes/60); const m=act.totalMinutes%60;
+                li.innerHTML = `
+                    <div class="info">
+                        <div class="description"><strong>${escapeHTML(act.projectName)}:</strong> ${escapeHTML(act.description)}</div>
+                        <div class="date">${fDate} (<span class="day-name">${dName}</span>)</div>
+                        <div class="details">
+                            <span class="detail-tag type-${act.activityType.toLowerCase()}">${escapeHTML(act.activityType)}</span>
+                            <span class="detail-tag status-${act.status.toLowerCase().replace(' ','-')}">${escapeHTML(act.status)}</span>
+                            <span class="detail-tag priority-${act.priority.toLowerCase()}">P: ${escapeHTML(act.priority)}</span>
                         </div>
-                        <div class="duration">${h}h ${m}m</div>
-                    `;
-                    logList.appendChild(li);
+                    </div>
+                    <div class="duration">${h}h ${m}m</div>`;
+                DOMElements.projectActivityList.appendChild(li);
+            });
+        }
+
+        // --- Exportações (adaptar para ser contextual) ---
+        // TODO: Fazer botões de exportação funcionarem para a aba ativa
+        // Por ora, mantendo os de treinamento e adicionando placeholders para os de projeto
+        DOMElements.exportTxtTrainingsButton.addEventListener('click', () => exportData('txt', 'trainings'));
+        DOMElements.exportExcelTrainingsButton.addEventListener('click', () => exportData('excel', 'trainings'));
+        DOMElements.exportTxtProjectsButton.addEventListener('click', () => exportData('txt', 'projects'));
+        DOMElements.exportExcelProjectsButton.addEventListener('click', () => exportData('excel', 'projects'));
+
+        function exportData(format, type) {
+            const dataToExport = type === 'trainings' ? trainingLogs : projectActivities;
+            const dataTypeLabel = type === 'trainings' ? 'Treinamento' : 'Atividades de Projeto';
+
+            if (dataToExport.length === 0) { alert(`Nenhum registro de ${dataTypeLabel.toLowerCase()} para exportar.`); return; }
+
+            if (format === 'txt') {
+                let txtContent = `Relatório de ${dataTypeLabel} - Trilha Edu (Usuário: ${currentUserEmail || currentUserId || 'N/A'})\n\n`;
+                const totalMinutesOverall = dataToExport.reduce((sum, item) => sum + item.totalMinutes, 0);
+                const totalH = Math.floor(totalMinutesOverall / 60);
+                const totalM = totalMinutesOverall % 60;
+                txtContent += `Total de Horas Registradas (${dataTypeLabel}): ${totalH}h ${totalM}m\n`;
+                txtContent += "--------------------------------------------------\n\n";
+
+                dataToExport.forEach(item => {
+                    let fDate="Inválida",dName="";
+                    if(item.date&&typeof item.date==='string'){const dO=new Date(item.date+'T00:00:00');if(!isNaN(dO)){fDate=dO.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'});dName=dO.toLocaleDateString('pt-BR',{weekday:'long'});}}
+                    else if(item.date&&item.date.toDate){const dO=item.date.toDate();fDate=dO.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'});dName=dO.toLocaleDateString('pt-BR',{weekday:'long'});}
+                    const h=Math.floor(item.totalMinutes/60); const m=item.totalMinutes%60;
+                    
+                    if (type === 'trainings') {
+                        const statusText = item.status==='concluido'?'Concluído':'Não Concluído';
+                        txtContent += `Curso/Atividade: ${item.description}\nData: ${fDate} (${dName})\nDuração: ${h}h ${m}m\nStatus: ${statusText}\n`;
+                    } else { // projects
+                        txtContent += `Projeto: ${item.projectName}\nAtividade: ${item.description}\nData: ${fDate} (${dName})\nDuração: ${h}h ${m}m\nTipo: ${item.activityType}\nStatus: ${item.status}\nPrioridade: ${item.priority}\n`;
+                    }
+                    txtContent += "--------------------------------------------------\n";
                 });
+                const blob = new Blob([txtContent], { type: 'text/plain;charset=utf-8' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `relatorio_${type}_${currentUserId || 'export'}.txt`;
+                document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(link.href);
+
+            } else if (format === 'excel') {
+                if (typeof XLSX === 'undefined') { alert('Biblioteca SheetJS não carregada.'); return; }
+                let dataForSheet;
+                if (type === 'trainings') {
+                    dataForSheet = dataToExport.map(item => { /* ... como na v4 ... */ 
+                        let fD="Inv.",dN=""; if(item.date&&typeof item.date==='string'){const dO=new Date(item.date+'T00:00:00');if(!isNaN(dO)){fD=dO.toLocaleDateString('pt-BR');dN=dO.toLocaleDateString('pt-BR',{weekday:'long'});}}else if(item.date&&item.date.toDate){const dO=item.date.toDate();fD=dO.toLocaleDateString('pt-BR');dN=dO.toLocaleDateString('pt-BR',{weekday:'long'});}
+                        const h=Math.floor(item.totalMinutes/60), m=item.totalMinutes%60;
+                        return {'Curso/Atividade':item.description,'Data':fD,'Dia da Semana':dN,'Horas':h,'Minutos':m,'Status':item.status==='concluido'?'Concluído':'Não Concluído'};
+                    });
+                } else { // projects
+                    dataForSheet = dataToExport.map(item => {
+                        let fD="Inv.",dN=""; if(item.date&&typeof item.date==='string'){const dO=new Date(item.date+'T00:00:00');if(!isNaN(dO)){fD=dO.toLocaleDateString('pt-BR');dN=dO.toLocaleDateString('pt-BR',{weekday:'long'});}}else if(item.date&&item.date.toDate){const dO=item.date.toDate();fD=dO.toLocaleDateString('pt-BR');dN=dO.toLocaleDateString('pt-BR',{weekday:'long'});}
+                        const h=Math.floor(item.totalMinutes/60), m=item.totalMinutes%60;
+                        return {'Projeto':item.projectName, 'Atividade':item.description,'Data':fD,'Dia da Semana':dN,'Horas':h,'Minutos':m, 'Tipo':item.activityType, 'Status':item.status, 'Prioridade':item.priority};
+                    });
+                }
+
+                const worksheet = XLSX.utils.json_to_sheet(dataForSheet);
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, dataTypeLabel);
+                const totalMinutesOverall = dataToExport.reduce((sum, item) => sum + item.totalMinutes, 0);
+                const totalH = Math.floor(totalMinutesOverall / 60);
+                const totalM = totalMinutesOverall % 60;
+                XLSX.utils.sheet_add_aoa(worksheet, [ [], [`Total Horas (${dataTypeLabel}):`, totalH, `Total Minutos (${dataTypeLabel}):`, totalM]], { origin: -1 });
+                XLSX.writeFile(workbook, `relatorio_${type}_${currentUserId || 'export'}.xlsx`);
             }
         }
-
-        function updateTotalHours() {
-            const totalMinutesOverall = logs.reduce((sum, log) => sum + log.totalMinutes, 0);
-            const totalH = Math.floor(totalMinutesOverall / 60);
-            const totalM = totalMinutesOverall % 60;
-            totalHoursDisplay.textContent = `${totalH}h ${totalM}m`;
-        }
-
-        function escapeHTML(str) {
-            if (typeof str !== 'string') return '';
-            const div = document.createElement('div');
-            div.appendChild(document.createTextNode(str));
-            return div.innerHTML;
-        }
-
-        // --- Exportações ---
-        exportTxtButton.addEventListener('click', () => {
-            if (logs.length === 0) { alert('Nenhum registro para exportar.'); return; }
-            let txtContent = `Relatório de Horas - Trilha Edu (Usuário: ${currentUserEmail || currentUserId || 'N/A'})\n\n`;
-            const totalMinutesOverall = logs.reduce((sum, log) => sum + log.totalMinutes, 0);
-            const totalH = Math.floor(totalMinutesOverall / 60);
-            const totalM = totalMinutesOverall % 60;
-            txtContent += `Total de Horas Registradas: ${totalH}h ${totalM}m\n`;
-            txtContent += "--------------------------------------------------\n\n";
-            logs.forEach(log => {
-                let formattedDate = "Data inválida"; let dayName = "";
-                 if (log.date && typeof log.date === 'string') {
-                    const dateObj = new Date(log.date + 'T00:00:00');
-                     if (!isNaN(dateObj)) {
-                        formattedDate = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                        dayName = dateObj.toLocaleDateString('pt-BR', { weekday: 'long' }); }
-                } else if (log.date && log.date.toDate) {
-                    const dateObj = log.date.toDate();
-                    formattedDate = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                    dayName = dateObj.toLocaleDateString('pt-BR', { weekday: 'long' });
-                }
-                const h = Math.floor(log.totalMinutes / 60);
-                const m = log.totalMinutes % 60;
-                const statusText = log.status === 'concluido' ? 'Concluído' : 'Não Concluído';
-                txtContent += `Curso/Atividade: ${log.description}\nData: ${formattedDate} (${dayName})\nDuração: ${h}h ${m}m\nStatus: ${statusText}\n--------------------------------------------------\n`;
-            });
-            const blob = new Blob([txtContent], { type: 'text/plain;charset=utf-8' });
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = `relatorio_trilha_edu_${currentUserId || 'export'}.txt`;
-            document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(link.href);
-        });
-
-        exportExcelButton.addEventListener('click', () => {
-            if (logs.length === 0) { alert('Nenhum registro para exportar.'); return; }
-            if (typeof XLSX === 'undefined') {
-                alert('A biblioteca de exportação para Excel (SheetJS) não foi carregada.'); return;
-            }
-            const dataForExcel = logs.map(log => {
-                let formattedDate = "Data inválida"; let dayName = "";
-                 if (log.date && typeof log.date === 'string') {
-                    const dateObj = new Date(log.date + 'T00:00:00');
-                     if (!isNaN(dateObj)) {
-                        formattedDate = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                        dayName = dateObj.toLocaleDateString('pt-BR', { weekday: 'long' }); }
-                } else if (log.date && log.date.toDate) {
-                    const dateObj = log.date.toDate();
-                    formattedDate = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                    dayName = dateObj.toLocaleDateString('pt-BR', { weekday: 'long' });
-                }
-                const h = Math.floor(log.totalMinutes / 60);
-                const m = log.totalMinutes % 60;
-                return {
-                    'Curso/Atividade': log.description, 'Data': formattedDate, 'Dia da Semana': dayName,
-                    'Horas': h, 'Minutos': m, 'Status': log.status === 'concluido' ? 'Concluído' : 'Não Concluído'
-                };
-            });
-            const worksheet = XLSX.utils.json_to_sheet(dataForExcel);
-            const workbook = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(workbook, worksheet, "Registros");
-            const totalMinutesOverall = logs.reduce((sum, log) => sum + log.totalMinutes, 0);
-            const totalH = Math.floor(totalMinutesOverall / 60);
-            const totalM = totalMinutesOverall % 60;
-            XLSX.utils.sheet_add_aoa(worksheet, [ [], ["Total Geral Horas:", totalH, "Total Geral Minutos:", totalM]], { origin: -1 });
-            XLSX.writeFile(workbook, `relatorio_trilha_edu_${currentUserId || 'export'}.xlsx`);
-        });
+        
+        function escapeHTML(str) { /* ... igual à v4 ... */ if(typeof str!=='string')return'';const d=document.createElement('div');d.appendChild(document.createTextNode(str));return d.innerHTML;}
 
         // --- Inicialização ---
         const today = new Date().toISOString().split('T')[0];
-        dateInput.value = today; dateInput.max = today;
-        updateTimerDisplay(); pauseTimerButton.disabled = true; 
+        DOMElements.trainingDateInput.value = today; DOMElements.trainingDateInput.max = today;
+        DOMElements.projectActivityDateInput.value = today; // Pode ou não ter max, dependendo da lógica de projeto
+        
+        switchView('trainings'); // Visão inicial
+        // A carga de dados agora é feita por onAuthStateChanged -> loadAllUserData
+        // As chamadas de reset dos timers são feitas ao abrir os respectivos modais.
+        resetTrainingTimer(); // Chamada inicial para garantir o display
+        resetProjectTimer();  // Chamada inicial para garantir o display
+        DOMElements.trainingPauseTimer.disabled = true; 
+        DOMElements.projectPauseTimer.disabled = true;
     </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
     <style>
-        :root {
+        :root { /* ... Cores e fontes como na v4 ... */ 
             --primary-color: #6a11cb; --secondary-color: #2575fc; --background-color: #f4f7f6;
             --card-color: #ffffff; --text-color: #333333; --light-gray: #e0e0e0;
-            --green: #4CAF50; --red: #f44336; --orange: #ff9800;
+            --green: #4CAF50; --red: #f44336; --orange: #ff9800; --blue-tag: #2196F3; --purple-tag: #9C27B0;
             --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
         }
-        body {
+        body { /* ... Estilo body como na v4 ... */ 
             font-family: var(--font-family); background-color: var(--background-color); color: var(--text-color);
             margin: 0; padding: 20px; display: flex; justify-content: center; align-items: flex-start;
             min-height: 100vh; box-sizing: border-box;
         }
-        .app-container {
+        .app-container { /* ... Estilo app-container como na v4 ... */ 
             width: 100%; max-width: 800px; background-color: var(--card-color);
             border-radius: 15px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); overflow: hidden;
         }
-        header {
+        header { /* ... Estilo header como na v4 ... */ 
             background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)); color: white;
             padding: 20px 30px; text-align: center;
         }
         header h1 { margin: 0; font-size: 1.8em; font-weight: 700; }
-        
-        .auth-area { 
+        .auth-area { /* ... Estilo auth-area como na v4 ... */ 
             font-size: 0.9em; margin-top: 10px; display: flex; 
             justify-content: center; align-items: center; gap: 15px; flex-wrap: wrap;
         }
-        .auth-area button {
+        .auth-area button { /* ... Estilo auth-area button como na v4 ... */
             background-color: rgba(255,255,255,0.2); color: white; border: 1px solid white;
             padding: 6px 12px; border-radius: 5px; cursor: pointer; font-size: 0.9em;
         }
         .auth-area button:hover { background-color: rgba(255,255,255,0.3); }
         #auth-controls-logged-in span { margin-right: 10px; }
 
+        .app-navigation {
+            display: flex;
+            border-bottom: 1px solid var(--light-gray);
+            background-color: #fdfdfd;
+        }
+        .nav-button {
+            flex-grow: 1;
+            padding: 15px;
+            text-align: center;
+            cursor: pointer;
+            border: none;
+            background-color: transparent;
+            font-size: 1.1em;
+            color: var(--text-color);
+            opacity: 0.7;
+            border-bottom: 3px solid transparent;
+            transition: opacity 0.3s, border-bottom-color 0.3s;
+        }
+        .nav-button:hover {
+            opacity: 1;
+        }
+        .nav-button.active {
+            opacity: 1;
+            font-weight: 600;
+            color: var(--primary-color);
+            border-bottom-color: var(--primary-color);
+        }
 
         .summary-section { padding: 25px 30px; text-align: center; border-bottom: 1px solid var(--light-gray); }
         .summary-section h2 { margin: 0 0 10px; color: var(--primary-color); font-size: 1.2em; font-weight: 600; }
-        #total-hours { font-size: 2.8em; font-weight: 700; color: var(--secondary-color); }
-        main { padding: 30px; }
-        .main-actions { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; gap: 10px; flex-wrap: wrap; }
-        .main-actions button {
-            padding: 8px 15px; background-color: var(--primary-color); color: white; border: none;
-            border-radius: 5px; cursor: pointer; font-size: 0.9em; transition: background-color 0.3s;
-            flex-basis: calc(33.333% - 7px); /* Três botões por linha com gap */
-            box-sizing: border-box;
-        }
-        .main-actions button:hover { background-color: var(--secondary-color); }
+        #total-training-hours { font-size: 2.8em; font-weight: 700; color: var(--secondary-color); }
+        
+        main { padding: 0; /* Removido padding para as sections internas controlarem */ }
+        .tab-content { padding: 30px; }
 
-        .log-list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-        .log-list-header h3 { margin: 0; font-size: 1.4em; color: var(--text-color); }
-        #log-list { list-style: none; padding: 0; margin: 0; }
-        .log-item {
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 1px dashed var(--light-gray);
+            padding-bottom: 15px;
+        }
+        .section-header h3 { margin: 0; font-size: 1.4em; color: var(--text-color); }
+        .section-actions { display: flex; gap: 10px; }
+        .section-actions button {
+            padding: 8px 12px; background-color: var(--primary-color); color: white; border: none;
+            border-radius: 5px; cursor: pointer; font-size: 0.85em; transition: background-color 0.3s;
+        }
+        .section-actions button:hover { background-color: var(--secondary-color); }
+
+
+        .log-list, .project-activity-list { list-style: none; padding: 0; margin: 0; }
+        .log-item, .project-activity-item { /* Estilos base para itens de lista */
             display: flex; justify-content: space-between; align-items: center; padding: 18px 15px;
             border-bottom: 1px solid var(--light-gray); transition: background-color 0.3s;
         }
-        .log-item:last-child { border-bottom: none; }
-        .log-item:hover { background-color: #f9f9f9; }
-        .log-item .info { flex-grow: 1; }
-        .log-item .description { font-weight: 600; font-size: 1.05em; margin-bottom: 5px; }
-        .log-item .date { color: #555555; font-size: 0.9em; }
-        .log-item .day-name { text-transform: capitalize; }
-        .log-item .status {
-            font-size: 0.85em; font-weight: 600; padding: 3px 8px; border-radius: 4px;
-            margin-top: 5px; display: inline-block;
+        .log-item:last-child, .project-activity-item:last-child { border-bottom: none; }
+        .log-item:hover, .project-activity-item:hover { background-color: #f9f9f9; }
+        .log-item .info, .project-activity-item .info { flex-grow: 1; }
+        .log-item .description, .project-activity-item .description { font-weight: 600; font-size: 1.05em; margin-bottom: 5px; }
+        .log-item .date, .project-activity-item .date { color: #555555; font-size: 0.9em; }
+        .log-item .day-name, .project-activity-item .day-name { text-transform: capitalize; }
+        .log-item .status, .project-activity-item .details .detail-tag {
+            font-size: 0.85em; font-weight: 600; padding: 3px 8px; border-radius: 12px; /* Mais arredondado */
+            margin-top: 5px; display: inline-block; margin-right: 5px;
         }
         .log-item .status.concluido { background-color: var(--green); color: white; }
         .log-item .status.nao-concluido { background-color: var(--orange); color: white; }
-        .log-item .duration {
+        
+        .project-activity-item .details { margin-top: 8px; }
+        .detail-tag.type-design { background-color: var(--blue-tag); color:white; }
+        .detail-tag.type-desenvolvimento { background-color: var(--purple-tag); color:white; }
+        .detail-tag.type-reunião { background-color: #795548; color:white; } /* Marrom */
+        .detail-tag.type-teste { background-color: #FFC107; color: var(--text-color); } /* Amarelo */
+        .detail-tag.type-documentação { background-color: #009688; color:white; } /* Teal */
+        .detail-tag.type-outra { background-color: #607D8B; color:white; } /* Cinza Azulado */
+        .detail-tag.status-a-fazer { background-color: var(--light-gray); color: var(--text-color);}
+        .detail-tag.status-em-progresso { background-color: var(--orange); color:white;}
+        .detail-tag.status-concluída { background-color: var(--green); color:white;}
+        .detail-tag.status-bloqueada { background-color: var(--red); color:white;}
+        .detail-tag.priority-baixa { border: 1px solid var(--green); color: var(--green);}
+        .detail-tag.priority-média { border: 1px solid var(--orange); color: var(--orange);}
+        .detail-tag.priority-alta { border: 1px solid var(--red); color: var(--red);}
+
+
+        .log-item .duration, .project-activity-item .duration {
             font-weight: 700; font-size: 1.1em; color: var(--secondary-color);
             white-space: nowrap; margin-left: 15px; text-align: right;
         }
-        .add-button {
+        .add-global-button { /* Renomeado de .add-button */
             position: fixed; bottom: 30px; right: 30px; width: 60px; height: 60px;
             background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)); color: white;
             border: none; border-radius: 50%; font-size: 2.2em; line-height: 60px; text-align: center;
@@ -587,33 +693,37 @@
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2); cursor: pointer;
             transition: transform 0.3s ease, box-shadow 0.3s ease; z-index: 999;
         }
-        .add-button:hover { transform: scale(1.1); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3); }
-        .modal {
+        .add-global-button:hover { transform: scale(1.1); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3); }
+        
+        .modal { /* ... Estilo modal como na v4 ... */
             display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%;
             overflow: auto; background-color: rgba(0,0,0,0.6); justify-content: center; align-items: center;
             padding: 20px; box-sizing: border-box;
         }
-        .modal-content {
+        .modal-content { /* ... Estilo modal-content como na v4 ... */
             background-color: var(--card-color); padding: 30px; border-radius: 10px;
-            box-shadow: 0 5px 20px rgba(0,0,0,0.25); width: 100%; max-width: 500px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.25); width: 100%; max-width: 550px; /* Aumentado um pouco */
             animation: slide-down 0.4s ease-out; max-height: 90vh; overflow-y: auto;
         }
-        #auth-modal .modal-content { max-width: 400px; } /* Modal de auth menor */
+        #auth-modal .modal-content { max-width: 400px; } 
 
         @keyframes slide-down { from { transform: translateY(-50px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         .modal-content h3 { margin-top: 0; margin-bottom: 25px; text-align: center; color: var(--primary-color); font-size: 1.5em; }
-        .timer-section {
+        .timer-section { /* ... Estilo timer-section como na v4 ... */
             text-align: center; margin-bottom: 20px; padding: 15px; background-color: #f9f9f9; border-radius: 8px;
         }
-        #timer-display { font-size: 2.2em; font-weight: bold; color: var(--primary-color); margin-bottom: 10px; }
-        .timer-controls button {
+        /* IDs dos displays de timer e botões foram prefixados (training-, project-) */
+        #training-timer-display, #project-timer-display { font-size: 2.2em; font-weight: bold; color: var(--primary-color); margin-bottom: 10px; }
+        .timer-controls button { /* ... Estilo timer-controls button como na v4 ... */
             padding: 8px 15px; margin: 0 5px; border: none; border-radius: 5px; cursor: pointer;
             font-weight: 500; transition: background-color 0.3s;
         }
-        #start-timer { background-color: var(--green); color: white; }
-        #pause-timer { background-color: var(--orange); color: white; }
-        #reset-timer { background-color: var(--red); color: white; }
-        #apply-timer { background-color: var(--secondary-color); color: white; margin-top:10px;}
+        /* IDs dos botões de timer foram prefixados */
+        #training-start-timer, #project-start-timer { background-color: var(--green); color: white; }
+        #training-pause-timer, #project-pause-timer { background-color: var(--orange); color: white; }
+        #training-reset-timer, #project-reset-timer { background-color: var(--red); color: white; }
+        #training-apply-timer, #project-apply-timer { background-color: var(--secondary-color); color: white; margin-top:10px;}
+        
         .form-group { margin-bottom: 20px; }
         .form-group label { display: block; margin-bottom: 8px; font-weight: 600; font-size: 0.95em; }
         .form-group input[type="text"], .form-group input[type="date"], .form-group input[type="number"], 
@@ -621,69 +731,81 @@
             width: 100%; padding: 12px; border: 1px solid var(--light-gray); border-radius: 8px;
             box-sizing: border-box; font-size: 1em;
         }
-        .form-group input:focus, .form-group select:focus {
+        .form-group input:focus, .form-group select:focus { /* ... como na v4 ... */
             outline: none; border-color: var(--primary-color); box-shadow: 0 0 0 2px rgba(106, 17, 203, 0.2);
         }
         .form-group-inline { display: flex; gap: 15px; }
         .form-group-inline > div { flex: 1; }
         .form-buttons { display: flex; justify-content: flex-end; gap: 10px; margin-top: 30px; }
-        .form-buttons button {
+        .form-buttons button { /* ... Estilo form-buttons button como na v4 ... */
             padding: 12px 25px; border-radius: 8px; border: none; cursor: pointer;
             font-weight: 600; font-size: 1em; transition: background-color 0.3s ease, transform 0.2s ease;
         }
-        #auth-form .form-buttons button { flex-grow: 1; } /* Botões do modal de auth ocupam mais espaço */
+        #auth-form .form-buttons button { flex-grow: 1; } 
         #auth-error-message { color: var(--red); font-size: 0.9em; margin-top: 10px; text-align: center; display: block;}
 
-
-        #save-log-button { background-color: var(--green); color: white; }
-        #save-log-button:hover { background-color: #45a049; transform: translateY(-1px); }
-        #cancel-log-button, #close-manage-courses-button, #cancel-auth-button { background-color: #f0f0f0; color: var(--text-color); }
-        #cancel-log-button:hover, #close-manage-courses-button:hover, #cancel-auth-button:hover { background-color: #e0e0e0; transform: translateY(-1px); }
+        /* Botões de salvar específicos */
+        #save-training-log-button, #save-project-activity-button { background-color: var(--green); color: white; }
+        #save-training-log-button:hover, #save-project-activity-button:hover { background-color: #45a049; transform: translateY(-1px); }
+        
+        /* Botões de cancelar específicos */
+        #cancel-training-log-button, #close-manage-courses-button, #cancel-auth-button, 
+        #cancel-project-activity-button, #close-manage-projects-button { background-color: #f0f0f0; color: var(--text-color); }
+        #cancel-training-log-button:hover, #close-manage-courses-button:hover, #cancel-auth-button:hover,
+        #cancel-project-activity-button:hover, #close-manage-projects-button:hover { background-color: #e0e0e0; transform: translateY(-1px); }
         
         #login-button { background-color: var(--secondary-color); color: white;}
         #register-button { background-color: var(--primary-color); color: white;}
 
-
         .empty-list-message { text-align: center; color: #888888; padding: 20px; font-style: italic; }
-        #manage-courses-modal .form-group { display: flex; align-items: center; gap: 10px; }
-        #new-course-name { flex-grow: 1; }
-        #add-course-button {
+        
+        /* Estilos para Gerenciamento de Cursos/Projetos (listas e botões de adicionar) */
+        #manage-courses-modal .form-group, #manage-projects-modal .form-group { display: flex; align-items: center; gap: 10px; }
+        #new-course-name, #new-project-name { flex-grow: 1; }
+        #add-course-button, #add-project-button {
             padding: 12px 20px; background-color: var(--green); color: white; border: none;
             border-radius: 8px; cursor: pointer; font-size: 0.9em;
         }
-        #registered-courses-list {
+        #registered-courses-list, #registered-projects-list { /* ... Estilo como na v4 ... */
             list-style: none; padding: 0; margin-top: 20px; max-height: 200px;
             overflow-y: auto; border: 1px solid var(--light-gray); border-radius: 8px;
         }
-        .registered-course-item {
+        .registered-course-item /* Reutilizado para projetos */ { /* ... Estilo como na v4 ... */
             display: flex; justify-content: space-between; align-items: center;
             padding: 10px 15px; border-bottom: 1px solid var(--light-gray);
         }
         .registered-course-item:last-child { border-bottom: none; }
-        .remove-course-button {
+        .remove-item-button /* Classe genérica para remover curso/projeto */ {
             background-color: var(--red); color: white; border: none; border-radius: 5px;
             padding: 5px 10px; cursor: pointer; font-size: 0.8em;
         }
-        @media (max-width: 600px) {
+
+        @media (max-width: 600px) { /* ... Media queries como na v4, com ajustes para novos elementos se necessário ... */
             body { padding: 0; }
             .app-container { border-radius: 0; min-height: 100vh; }
             header { padding: 20px; }
             header h1 { font-size: 1.5em; }
             .auth-area { flex-direction: column; gap: 8px; }
             .auth-area button { width: auto; }
-            .summary-section, main { padding: 20px; }
-            #total-hours { font-size: 2.2em; }
-            .main-actions { flex-direction: column; }
-            .main-actions button { width: 100%; flex-basis: auto; }
-            .log-list-header h3 { font-size: 1.2em; text-align: center; width: 100%; margin-bottom: 10px;}
-            .log-item { flex-direction: column; align-items: flex-start; gap: 8px; padding: 15px 10px; }
-            .log-item .duration { margin-left: 0; align-self: flex-start; }
-            .log-item .status { align-self: flex-start; }
-            .add-button { width: 55px; height: 55px; font-size: 2em; line-height: 55px; bottom: 20px; right: 20px; }
+            .app-navigation { flex-direction: column; }
+            .nav-button { border-bottom-width: 2px; font-size: 1em; }
+            .summary-section, .tab-content { padding: 20px; }
+            #total-training-hours { font-size: 2.2em; }
+            .section-header { flex-direction: column; align-items:stretch; text-align:center; }
+            .section-header h3 { margin-bottom: 10px; }
+            .section-actions { flex-direction: column; }
+            .section-actions button { width: 100%; }
+            
+            .log-item, .project-activity-item { flex-direction: column; align-items: flex-start; gap: 8px; padding: 15px 10px; }
+            .log-item .duration, .project-activity-item .duration { margin-left: 0; align-self: flex-start; }
+            .log-item .status, .project-activity-item .details { align-self: flex-start; }
+            .project-activity-item .details .detail-tag { margin-bottom: 5px;}
+
+            .add-global-button { width: 55px; height: 55px; font-size: 2em; line-height: 55px; bottom: 20px; right: 20px; }
             .modal-content { width: 100%; padding: 20px; max-width: none; }
             .form-buttons button { padding: 10px 15px; font-size: 0.9em; }
             #auth-form .form-buttons button { font-size: 1em; }
-            #timer-display { font-size: 1.8em;}
+            #training-timer-display, #project-timer-display { font-size: 1.8em;}
             .timer-controls button { padding: 8px 10px; font-size: 0.9em;}
         }
     </style>
@@ -703,105 +825,195 @@
                 </div>
             </div>
         </header>
-        <section class="summary-section">
-            <h2>Total de Horas de Treinamento</h2>
-            <div id="total-hours">0h 0m</div>
-        </section>
+
+        <nav class="app-navigation">
+            <button id="nav-trainings" class="nav-button active">Treinamentos</button>
+            <button id="nav-projects" class="nav-button">Projetos</button>
+        </nav>
+        
         <main>
-            <div class="log-list-header">
-                <h3>Meus Registros</h3>
-            </div>
-            <div class="main-actions">
-                <button id="manage-courses-button">Gerenciar Cursos</button>
-                <button id="export-txt-button">Exportar para TXT</button> 
-                <button id="export-excel-button">Exportar para Excel</button>
-            </div>
-            <ul id="log-list"></ul>
+            <section id="trainings-section" class="tab-content">
+                <div class="summary-section" style="padding: 0 0 25px 0; border-top: none;"> <h2>Total de Horas de Treinamento</h2>
+                    <div id="total-training-hours">0h 0m</div>
+                </div>
+                <div class="section-header">
+                    <h3>Meus Treinamentos</h3>
+                    <div class="section-actions">
+                        <button id="manage-courses-button">Gerenciar Cursos</button>
+                        <button id="export-txt-trainings-button">Exportar TXT</button> 
+                        <button id="export-excel-trainings-button">Exportar Excel</button>
+                    </div>
+                </div>
+                <ul id="training-log-list" class="log-list"></ul>
+            </section>
+
+            <section id="projects-section" class="tab-content" style="display: none;">
+                 <div class="summary-section" style="padding: 0 0 25px 0; border-top: none;">
+                    <h2>Atividades de Projeto</h2>
+                    <div id="total-project-hours-summary" style="font-size: 1.2em; color: var(--secondary-color); margin-top:10px;">Acompanhe suas atividades!</div>
+                </div>
+                <div class="section-header">
+                    <h3>Minhas Atividades de Projeto</h3>
+                    <div class="section-actions">
+                        <button id="manage-projects-button">Gerenciar Projetos</button>
+                        <button id="export-txt-projects-button">Exportar TXT</button> 
+                        <button id="export-excel-projects-button">Exportar Excel</button>
+                    </div>
+                </div>
+                <ul id="project-activity-list" class="project-activity-list"></ul>
+            </section>
         </main>
     </div>
 
-    <button class="add-button" id="add-log-button" aria-label="Adicionar novo registro">+</button>
+    <button class="add-global-button" id="add-global-button" aria-label="Adicionar novo registro">+</button>
 
-    <div id="auth-modal" class="modal">
+    <div id="auth-modal" class="modal"> /* ... Conteúdo igual à v4 ... */ 
         <div class="modal-content">
             <h3>Login / Registrar</h3>
             <form id="auth-form">
-                <div class="form-group">
-                    <label for="auth-email">Email</label>
-                    <input type="email" id="auth-email" required>
-                </div>
-                <div class="form-group">
-                    <label for="auth-password">Senha (mínimo 6 caracteres)</label>
-                    <input type="password" id="auth-password" required minlength="6">
-                </div>
+                <div class="form-group"><label for="auth-email">Email</label><input type="email" id="auth-email" required></div>
+                <div class="form-group"><label for="auth-password">Senha (mín. 6 caracteres)</label><input type="password" id="auth-password" required minlength="6"></div>
                 <div id="auth-error-message"></div>
-                <div class="form-buttons" style="margin-top: 15px;">
-                    <button type="button" id="login-button">Login</button>
-                    <button type="button" id="register-button">Registrar Nova Conta</button>
-                </div>
-                 <div class="form-buttons" style="margin-top: 10px; justify-content: center;">
-                    <button type="button" id="cancel-auth-button" style="background-color: var(--light-gray); color: var(--text-color); flex-grow: 0.5;">Cancelar</button>
-                </div>
+                <div class="form-buttons" style="margin-top: 15px;"><button type="button" id="login-button">Login</button><button type="button" id="register-button">Registrar Nova Conta</button></div>
+                <div class="form-buttons" style="margin-top: 10px; justify-content: center;"><button type="button" id="cancel-auth-button" style="background-color: var(--light-gray); color: var(--text-color); flex-grow: 0.5;">Cancelar</button></div>
             </form>
         </div>
     </div>
 
-    <div id="log-modal" class="modal">
+    <div id="training-log-modal" class="modal">
         <div class="modal-content">
-            <h3>Registrar Horas</h3>
+            <h3>Registrar Horas de Treinamento</h3>
             <div class="timer-section">
-                <div id="timer-display">00:00:00</div>
+                <div id="training-timer-display">00:00:00</div>
                 <div class="timer-controls">
-                    <button id="start-timer">Iniciar</button>
-                    <button id="pause-timer">Pausar</button>
-                    <button id="reset-timer">Zerar</button>
+                    <button id="training-start-timer">Iniciar</button>
+                    <button id="training-pause-timer">Pausar</button>
+                    <button id="training-reset-timer">Zerar</button>
                 </div>
-                <button id="apply-timer">Usar Tempo do Cronômetro</button>
+                <button id="training-apply-timer">Usar Tempo do Cronômetro</button>
             </div>
-            <form id="log-form">
+            <form id="training-log-form">
                 <div class="form-group">
-                    <label for="description">Curso / Atividade</label>
-                    <input type="text" id="description" name="description" list="course-suggestions" required>
-                    <datalist id="course-suggestions"></datalist>
+                    <label for="training-description">Curso / Atividade</label>
+                    <input type="text" id="training-description" name="description" list="training-course-suggestions" required>
+                    <datalist id="training-course-suggestions"></datalist>
                 </div>
                 <div class="form-group">
-                    <label for="date">Data</label>
-                    <input type="date" id="date" name="date" required>
+                    <label for="training-date">Data</label>
+                    <input type="date" id="training-date" name="training-date" required>
                 </div>
                 <div class="form-group form-group-inline">
-                    <div><label for="hours">Horas</label><input type="number" id="hours" name="hours" min="0" max="23" placeholder="h"></div>
-                    <div><label for="minutes">Minutos</label><input type="number" id="minutes" name="minutes" min="0" max="59" placeholder="m"></div>
+                    <div><label for="training-hours">Horas</label><input type="number" id="training-hours" name="training-hours" min="0" max="23" placeholder="h"></div>
+                    <div><label for="training-minutes">Minutos</label><input type="number" id="training-minutes" name="training-minutes" min="0" max="59" placeholder="m"></div>
                 </div>
                 <div class="form-group">
-                    <label for="status">Status</label>
-                    <select id="status" name="status">
+                    <label for="training-status">Status</label>
+                    <select id="training-status" name="status">
                         <option value="nao-concluido">Não Concluído</option>
                         <option value="concluido">Concluído</option>
                     </select>
                 </div>
                 <div class="form-buttons">
-                    <button type="button" id="cancel-log-button">Cancelar</button>
-                    <button type="submit" id="save-log-button">Salvar</button>
+                    <button type="button" id="cancel-training-log-button">Cancelar</button>
+                    <button type="submit" id="save-training-log-button">Salvar</button>
                 </div>
             </form>
         </div>
     </div>
 
-    <div id="manage-courses-modal" class="modal">
+    <div id="manage-courses-modal" class="modal"> /* ... Conteúdo similar à v4 ... */ 
         <div class="modal-content">
             <h3>Gerenciar Cursos Cadastrados</h3>
             <form id="add-course-form">
-                <div class="form-group">
-                    <label for="new-course-name" class="sr-only">Nome do Novo Curso</label>
-                    <input type="text" id="new-course-name" placeholder="Digite o nome do curso" required>
-                    <button type="submit" id="add-course-button">Adicionar</button>
-                </div>
+                <div class="form-group"><label for="new-course-name" class="sr-only">Nome</label><input type="text" id="new-course-name" placeholder="Nome do curso" required><button type="submit" id="add-course-button">Adicionar</button></div>
             </form>
             <ul id="registered-courses-list"></ul>
+            <div class="form-buttons"><button type="button" id="close-manage-courses-button">Fechar</button></div>
+        </div>
+    </div>
+
+    <div id="project-activity-modal" class="modal">
+        <div class="modal-content">
+            <h3>Registrar Atividade de Projeto</h3>
+            <div class="timer-section">
+                <div id="project-timer-display">00:00:00</div>
+                <div class="timer-controls">
+                    <button id="project-start-timer">Iniciar</button>
+                    <button id="project-pause-timer">Pausar</button>
+                    <button id="project-reset-timer">Zerar</button>
+                </div>
+                <button id="project-apply-timer">Usar Tempo do Cronômetro</button>
+            </div>
+            <form id="project-activity-form">
+                <div class="form-group">
+                    <label for="project-name">Nome do Projeto</label>
+                    <input type="text" id="project-name" name="project-name" list="project-suggestions" required>
+                    <datalist id="project-suggestions"></datalist>
+                </div>
+                <div class="form-group">
+                    <label for="project-activity-description">Descrição da Atividade</label>
+                    <input type="text" id="project-activity-description" name="project-activity-description" required>
+                </div>
+                <div class="form-group">
+                    <label for="project-activity-date">Data</label>
+                    <input type="date" id="project-activity-date" name="project-activity-date" required>
+                </div>
+                <div class="form-group form-group-inline">
+                    <div><label for="project-activity-hours">Horas</label><input type="number" id="project-activity-hours" name="project-activity-hours" min="0" placeholder="h"></div>
+                    <div><label for="project-activity-minutes">Minutos</label><input type="number" id="project-activity-minutes" name="project-activity-minutes" min="0" max="59" placeholder="m"></div>
+                </div>
+                <div class="form-group">
+                    <label for="project-activity-type">Tipo de Atividade</label>
+                    <select id="project-activity-type" name="project-activity-type">
+                        <option value="Desenvolvimento">Desenvolvimento</option>
+                        <option value="Design">Design</option>
+                        <option value="Reunião">Reunião</option>
+                        <option value="Teste">Teste</option>
+                        <option value="Documentação">Documentação</option>
+                        <option value="Outra">Outra</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="project-activity-status">Status da Atividade</label>
+                    <select id="project-activity-status" name="project-activity-status">
+                        <option value="A Fazer">A Fazer</option>
+                        <option value="Em Progresso">Em Progresso</option>
+                        <option value="Concluída">Concluída</option>
+                        <option value="Bloqueada">Bloqueada</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="project-activity-priority">Prioridade</label>
+                    <select id="project-activity-priority" name="project-activity-priority">
+                        <option value="Baixa">Baixa</option>
+                        <option value="Média">Média</option>
+                        <option value="Alta">Alta</option>
+                    </select>
+                </div>
+                <div class="form-buttons">
+                    <button type="button" id="cancel-project-activity-button">Cancelar</button>
+                    <button type="submit" id="save-project-activity-button">Salvar Atividade</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="manage-projects-modal" class="modal">
+        <div class="modal-content">
+            <h3>Gerenciar Nomes de Projetos</h3>
+            <form id="add-project-form">
+                <div class="form-group">
+                    <label for="new-project-name" class="sr-only">Nome do Projeto</label>
+                    <input type="text" id="new-project-name" placeholder="Nome do novo projeto" required>
+                    <button type="submit" id="add-project-button">Adicionar</button>
+                </div>
+            </form>
+            <ul id="registered-projects-list"></ul>
             <div class="form-buttons">
-                <button type="button" id="close-manage-courses-button">Fechar</button>
+                <button type="button" id="close-manage-projects-button">Fechar</button>
             </div>
         </div>
     </div>
+
 </body>
 </html>
