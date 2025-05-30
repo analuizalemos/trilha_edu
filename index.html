@@ -4,449 +4,703 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trilha Edu - Acompanhamento de Horas</title>
+    <script type="module">
+        // Importações do Firebase
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { 
+            getAuth, 
+            onAuthStateChanged, 
+            createUserWithEmailAndPassword, 
+            signInWithEmailAndPassword, 
+            signOut 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore, 
+            doc, 
+            setDoc, 
+            getDoc, 
+            collection, 
+            addDoc, 
+            onSnapshot, 
+            serverTimestamp 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Configuração do Firebase
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            apiKey: "YOUR_API_KEY", // Substitua se não fornecido pelo ambiente
+            authDomain: "YOUR_AUTH_DOMAIN",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_STORAGE_BUCKET",
+            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
+
+        const appIdGlobal = typeof __app_id !== 'undefined' ? __app_id : 'default-trilha-edu-app';
+
+        // Inicializa o Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        setLogLevel('debug'); 
+
+        let currentUserId = null;
+        let currentUserEmail = null;
+        let logs = [];
+        let registeredCourses = [];
+        let unsubscribeLogs = null; // Para cancelar o listener do onSnapshot
+
+        // Referências de elementos do DOM
+        const addLogButton = document.getElementById('add-log-button');
+        const logModal = document.getElementById('log-modal');
+        const cancelLogButton = document.getElementById('cancel-log-button');
+        const logForm = document.getElementById('log-form');
+        const logList = document.getElementById('log-list');
+        const totalHoursDisplay = document.getElementById('total-hours');
+        const dateInput = document.getElementById('date');
+        const exportTxtButton = document.getElementById('export-txt-button');
+        const exportExcelButton = document.getElementById('export-excel-button');
+        const courseSuggestionsDatalist = document.getElementById('course-suggestions');
+        const manageCoursesButton = document.getElementById('manage-courses-button');
+        const manageCoursesModal = document.getElementById('manage-courses-modal');
+        const closeManageCoursesButton = document.getElementById('close-manage-courses-button');
+        const addCourseForm = document.getElementById('add-course-form');
+        const newCourseNameInput = document.getElementById('new-course-name');
+        const registeredCoursesList = document.getElementById('registered-courses-list');
+        const timerDisplay = document.getElementById('timer-display');
+        const startTimerButton = document.getElementById('start-timer');
+        const pauseTimerButton = document.getElementById('pause-timer');
+        const resetTimerButton = document.getElementById('reset-timer');
+        const applyTimerButton = document.getElementById('apply-timer');
+        
+        // Elementos de Autenticação
+        const authControlsLoggedIn = document.getElementById('auth-controls-logged-in');
+        const authControlsLoggedOut = document.getElementById('auth-controls-logged-out');
+        const openAuthModalButton = document.getElementById('open-auth-modal-button');
+        const logoutButton = document.getElementById('logout-button');
+        const userEmailDisplay = document.getElementById('user-email-display');
+        const userIdDisplayInfo = document.getElementById('user-id-display-info'); // Renomeado para evitar conflito
+        const authModal = document.getElementById('auth-modal');
+        const authForm = document.getElementById('auth-form');
+        const authEmailInput = document.getElementById('auth-email');
+        const authPasswordInput = document.getElementById('auth-password');
+        const loginButton = document.getElementById('login-button');
+        const registerButton = document.getElementById('register-button');
+        const cancelAuthButton = document.getElementById('cancel-auth-button');
+        const authErrorMessage = document.getElementById('auth-error-message');
+
+        let timerInterval;
+        let timerSeconds = 0;
+        let timerRunning = false;
+        
+        // --- Autenticação ---
+        onAuthStateChanged(auth, async (user) => {
+            if (user) { // Usuário está logado
+                currentUserId = user.uid;
+                currentUserEmail = user.email;
+
+                userEmailDisplay.textContent = currentUserEmail ? `Logado como: ${currentUserEmail}` : 'Logado';
+                userIdDisplayInfo.textContent = `ID: ${currentUserId}`;
+                
+                authControlsLoggedIn.style.display = 'flex';
+                authControlsLoggedOut.style.display = 'none';
+                closeAuthModal(); 
+
+                await loadUserData();
+            } else { // Usuário está deslogado
+                currentUserId = null;
+                currentUserEmail = null;
+
+                userEmailDisplay.textContent = '';
+                userIdDisplayInfo.textContent = "Não autenticado";
+                
+                authControlsLoggedIn.style.display = 'none';
+                authControlsLoggedOut.style.display = 'block';
+
+                if (unsubscribeLogs) {
+                    unsubscribeLogs();
+                    unsubscribeLogs = null;
+                }
+                logs = [];
+                registeredCourses = [];
+                renderLogs();
+                renderRegisteredCourses();
+                populateCourseSuggestions();
+                updateTotalHours();
+            }
+        });
+        
+        async function loadUserData() {
+            if (!currentUserId) return;
+
+            if (unsubscribeLogs) { // Cancela listener anterior se existir
+                unsubscribeLogs();
+                unsubscribeLogs = null;
+            }
+
+            // Carregar Cursos
+            const coursesDocRef = doc(db, `artifacts/${appIdGlobal}/users/${currentUserId}/courseSettings`, "myCourses");
+            try {
+                const coursesDocSnap = await getDoc(coursesDocRef);
+                if (coursesDocSnap.exists() && coursesDocSnap.data().names) {
+                    registeredCourses = coursesDocSnap.data().names;
+                } else {
+                    registeredCourses = [];
+                }
+            } catch (error) {
+                console.error("Erro ao carregar cursos: ", error);
+                registeredCourses = [];
+            }
+            renderRegisteredCourses();
+            populateCourseSuggestions();
+
+            // Carregar Logs (com onSnapshot para tempo real)
+            const logsCollectionRef = collection(db, `artifacts/${appIdGlobal}/users/${currentUserId}/trainingLogs`);
+            unsubscribeLogs = onSnapshot(logsCollectionRef, (querySnapshot) => {
+                logs = [];
+                querySnapshot.forEach((doc) => {
+                    logs.push({ id: doc.id, ...doc.data() });
+                });
+                logs.sort((a, b) => {
+                    const dateA = a.date ? new Date(a.date) : 0;
+                    const dateB = b.date ? new Date(b.date) : 0;
+                    return dateB - dateA;
+                });
+                renderLogs();
+                updateTotalHours();
+            }, (error) => {
+                console.error("Erro ao carregar logs: ", error);
+            });
+        }
+
+        // --- Modais (Login/Registro, Logs, Gerenciar Cursos) ---
+        const openAuthModal = () => { authModal.style.display = 'flex'; authEmailInput.focus(); authErrorMessage.textContent = ''; }
+        const closeAuthModal = () => { authModal.style.display = 'none'; authForm.reset(); authErrorMessage.textContent = ''; }
+        openAuthModalButton.addEventListener('click', openAuthModal);
+        cancelAuthButton.addEventListener('click', closeAuthModal);
+
+        const openLogModal = () => { 
+            if (!currentUserId) { alert("Você precisa estar logado para adicionar registros."); return; }
+            logModal.style.display = 'flex'; populateCourseSuggestions(); document.getElementById('description').focus(); resetTimer(); 
+        }
+        const closeLogModal = () => { logModal.style.display = 'none'; logForm.reset(); resetTimer(); }
+        addLogButton.addEventListener('click', openLogModal);
+        cancelLogButton.addEventListener('click', closeLogModal);
+
+        const openManageCoursesModal = () => { 
+            if (!currentUserId) { alert("Você precisa estar logado para gerenciar cursos."); return; }
+            manageCoursesModal.style.display = 'flex'; renderRegisteredCourses(); newCourseNameInput.focus(); 
+        }
+        const closeManageCoursesModal = () => { manageCoursesModal.style.display = 'none'; addCourseForm.reset(); }
+        manageCoursesButton.addEventListener('click', openManageCoursesModal);
+        closeManageCoursesButton.addEventListener('click', closeManageCoursesModal);
+        
+        window.addEventListener('click', (event) => {
+            if (event.target === logModal) closeLogModal();
+            if (event.target === manageCoursesModal) closeManageCoursesModal();
+            if (event.target === authModal) closeAuthModal();
+        });
+        window.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                if (logModal.style.display === 'flex') closeLogModal();
+                if (manageCoursesModal.style.display === 'flex') closeManageCoursesModal();
+                if (authModal.style.display === 'flex') closeAuthModal();
+            }
+        });
+
+        // --- Lógica de Autenticação (Email/Senha) ---
+        loginButton.addEventListener('click', async () => {
+            const email = authEmailInput.value;
+            const password = authPasswordInput.value;
+            authErrorMessage.textContent = '';
+            try {
+                await signInWithEmailAndPassword(auth, email, password);
+                // onAuthStateChanged tratará o resto
+            } catch (error) {
+                console.error("Erro no login:", error);
+                authErrorMessage.textContent = `Erro no login: ${error.message}`;
+            }
+        });
+
+        registerButton.addEventListener('click', async () => {
+            const email = authEmailInput.value;
+            const password = authPasswordInput.value;
+            authErrorMessage.textContent = '';
+            try {
+                await createUserWithEmailAndPassword(auth, email, password);
+                // onAuthStateChanged tratará o resto
+            } catch (error) {
+                console.error("Erro no registro:", error);
+                authErrorMessage.textContent = `Erro no registro: ${error.message}`;
+            }
+        });
+
+        logoutButton.addEventListener('click', async () => {
+            try {
+                await signOut(auth);
+                // onAuthStateChanged tratará a limpeza de dados e UI
+            } catch (error) {
+                console.error("Erro no logout:", error);
+                alert(`Erro no logout: ${error.message}`);
+            }
+        });
+
+
+        // --- Gerenciamento de Cursos (Firestore) ---
+        async function renderRegisteredCourses() {
+            registeredCoursesList.innerHTML = '';
+            if (registeredCourses.length === 0) {
+                registeredCoursesList.innerHTML = '<li class="empty-list-message">Nenhum curso cadastrado.</li>';
+                return;
+            }
+            const sortedCourses = [...registeredCourses].sort((a,b) => a.localeCompare(b));
+            sortedCourses.forEach(course => {
+                const listItem = document.createElement('li');
+                listItem.classList.add('registered-course-item');
+                listItem.textContent = course;
+                const removeButton = document.createElement('button');
+                removeButton.classList.add('remove-course-button');
+                removeButton.textContent = 'Remover';
+                removeButton.addEventListener('click', async () => await removeCourse(course));
+                listItem.appendChild(removeButton);
+                registeredCoursesList.appendChild(listItem);
+            });
+        }
+
+        async function saveCoursesToFirestore() {
+            if (!currentUserId) return;
+            const coursesDocRef = doc(db, `artifacts/${appIdGlobal}/users/${currentUserId}/courseSettings`, "myCourses");
+            try {
+                await setDoc(coursesDocRef, { names: registeredCourses });
+            } catch (error) {
+                console.error("Erro ao salvar cursos: ", error);
+            }
+        }
+
+        async function addCourse(courseName) {
+            if (courseName && !registeredCourses.includes(courseName)) {
+                registeredCourses.push(courseName);
+                await saveCoursesToFirestore();
+                renderRegisteredCourses();
+                populateCourseSuggestions();
+            }
+        }
+
+        async function removeCourse(courseName) {
+            registeredCourses = registeredCourses.filter(course => course !== courseName);
+            await saveCoursesToFirestore();
+            renderRegisteredCourses();
+            populateCourseSuggestions();
+        }
+
+        addCourseForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const courseName = newCourseNameInput.value.trim();
+            if (courseName) {
+                await addCourse(courseName);
+                newCourseNameInput.value = '';
+            } else {
+                alert("Por favor, digite um nome para o curso.");
+            }
+        });
+
+        function populateCourseSuggestions() {
+            courseSuggestionsDatalist.innerHTML = '';
+            const sortedCourses = [...registeredCourses].sort((a,b) => a.localeCompare(b));
+            sortedCourses.forEach(course => {
+                const option = document.createElement('option');
+                option.value = course;
+                courseSuggestionsDatalist.appendChild(option);
+            });
+        }
+
+        // --- Cronômetro ---
+        function formatTime(totalSeconds) {
+            const h = Math.floor(totalSeconds / 3600);
+            const m = Math.floor((totalSeconds % 3600) / 60);
+            const s = totalSeconds % 60;
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        }
+        function updateTimerDisplay() { timerDisplay.textContent = formatTime(timerSeconds); }
+        startTimerButton.addEventListener('click', () => {
+            if (!timerRunning) {
+                timerRunning = true; startTimerButton.disabled = true; pauseTimerButton.disabled = false;
+                timerInterval = setInterval(() => { timerSeconds++; updateTimerDisplay(); }, 1000);
+            }
+        });
+        pauseTimerButton.addEventListener('click', () => {
+            if (timerRunning) {
+                timerRunning = false; startTimerButton.disabled = false; pauseTimerButton.disabled = true;
+                clearInterval(timerInterval);
+            }
+        });
+        function resetTimer() {
+            timerRunning = false; clearInterval(timerInterval); timerSeconds = 0; updateTimerDisplay();
+            startTimerButton.disabled = false; pauseTimerButton.disabled = true;
+        }
+        resetTimerButton.addEventListener('click', resetTimer);
+        applyTimerButton.addEventListener('click', () => {
+            const h = Math.floor(timerSeconds / 3600);
+            const m = Math.floor((timerSeconds % 3600) / 60);
+            document.getElementById('hours').value = h > 0 ? h : '';
+            document.getElementById('minutes').value = m > 0 ? m : '';
+            if (h === 0 && m === 0 && timerSeconds > 0) { document.getElementById('minutes').value = 1; }
+        });
+
+        // --- Registro de Horas (Firestore) ---
+        logForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!currentUserId) { alert("Autenticação necessária."); return; }
+
+            const description = document.getElementById('description').value;
+            const dateValue = document.getElementById('date').value;
+            const hours = parseInt(document.getElementById('hours').value) || 0;
+            const minutes = parseInt(document.getElementById('minutes').value) || 0;
+            const status = document.getElementById('status').value;
+            
+            const dateObj = new Date(dateValue + 'T00:00:00');
+            const dayOfWeek = dateObj.getDay();
+
+            if (dayOfWeek === 0 || dayOfWeek === 6) { alert('Selecione dias úteis (Seg-Sex).'); return; }
+            if (description.trim() === '') { alert('Preencha a descrição.'); document.getElementById('description').focus(); return; }
+            if (hours === 0 && minutes === 0) { alert('Insira uma duração válida.'); document.getElementById('hours').focus(); return; }
+
+            const totalMinutes = (hours * 60) + minutes;
+            const newLogData = {
+                description, date: dateValue, totalMinutes, status, createdAt: serverTimestamp()
+            };
+
+            try {
+                const logsCollectionRef = collection(db, `artifacts/${appIdGlobal}/users/${currentUserId}/trainingLogs`);
+                await addDoc(logsCollectionRef, newLogData);
+                closeLogModal();
+            } catch (error) {
+                console.error("Erro ao adicionar log: ", error);
+                alert("Erro ao salvar o registro. Tente novamente.");
+            }
+        });
+        
+        function renderLogs() {
+            logList.innerHTML = '';
+            if (logs.length === 0) {
+                logList.innerHTML = '<li class="empty-list-message">Nenhum registro. Adicione suas horas!</li>';
+            } else {
+                logs.forEach(log => {
+                    const li = document.createElement('li');
+                    li.classList.add('log-item');
+                    let formattedDate = "Data inválida"; let dayName = "";
+                    if (log.date && typeof log.date === 'string') {
+                        try {
+                            const dateObj = new Date(log.date + 'T00:00:00');
+                             if (!isNaN(dateObj)) {
+                                formattedDate = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                                dayName = dateObj.toLocaleDateString('pt-BR', { weekday: 'long' });
+                             }
+                        } catch (e) { console.warn("Erro ao formatar data do log:", log.date, e); }
+                    } else if (log.date && log.date.toDate) { 
+                         try {
+                            const dateObj = log.date.toDate();
+                            formattedDate = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                            dayName = dateObj.toLocaleDateString('pt-BR', { weekday: 'long' });
+                         } catch (e) { console.warn("Erro ao formatar timestamp do log:", log.date, e); }
+                    }
+                    const h = Math.floor(log.totalMinutes / 60);
+                    const m = log.totalMinutes % 60;
+                    const statusText = log.status === 'concluido' ? 'Concluído' : 'Não Concluído';
+                    li.innerHTML = `
+                        <div class="info">
+                            <div class="description">${escapeHTML(log.description)}</div>
+                            <div class="date">${formattedDate} (<span class="day-name">${dayName}</span>)</div>
+                            <div class="status ${log.status}">${statusText}</div>
+                        </div>
+                        <div class="duration">${h}h ${m}m</div>
+                    `;
+                    logList.appendChild(li);
+                });
+            }
+        }
+
+        function updateTotalHours() {
+            const totalMinutesOverall = logs.reduce((sum, log) => sum + log.totalMinutes, 0);
+            const totalH = Math.floor(totalMinutesOverall / 60);
+            const totalM = totalMinutesOverall % 60;
+            totalHoursDisplay.textContent = `${totalH}h ${totalM}m`;
+        }
+
+        function escapeHTML(str) {
+            if (typeof str !== 'string') return '';
+            const div = document.createElement('div');
+            div.appendChild(document.createTextNode(str));
+            return div.innerHTML;
+        }
+
+        // --- Exportações ---
+        exportTxtButton.addEventListener('click', () => {
+            if (logs.length === 0) { alert('Nenhum registro para exportar.'); return; }
+            let txtContent = `Relatório de Horas - Trilha Edu (Usuário: ${currentUserEmail || currentUserId || 'N/A'})\n\n`;
+            const totalMinutesOverall = logs.reduce((sum, log) => sum + log.totalMinutes, 0);
+            const totalH = Math.floor(totalMinutesOverall / 60);
+            const totalM = totalMinutesOverall % 60;
+            txtContent += `Total de Horas Registradas: ${totalH}h ${totalM}m\n`;
+            txtContent += "--------------------------------------------------\n\n";
+            logs.forEach(log => {
+                let formattedDate = "Data inválida"; let dayName = "";
+                 if (log.date && typeof log.date === 'string') {
+                    const dateObj = new Date(log.date + 'T00:00:00');
+                     if (!isNaN(dateObj)) {
+                        formattedDate = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                        dayName = dateObj.toLocaleDateString('pt-BR', { weekday: 'long' }); }
+                } else if (log.date && log.date.toDate) {
+                    const dateObj = log.date.toDate();
+                    formattedDate = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                    dayName = dateObj.toLocaleDateString('pt-BR', { weekday: 'long' });
+                }
+                const h = Math.floor(log.totalMinutes / 60);
+                const m = log.totalMinutes % 60;
+                const statusText = log.status === 'concluido' ? 'Concluído' : 'Não Concluído';
+                txtContent += `Curso/Atividade: ${log.description}\nData: ${formattedDate} (${dayName})\nDuração: ${h}h ${m}m\nStatus: ${statusText}\n--------------------------------------------------\n`;
+            });
+            const blob = new Blob([txtContent], { type: 'text/plain;charset=utf-8' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `relatorio_trilha_edu_${currentUserId || 'export'}.txt`;
+            document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(link.href);
+        });
+
+        exportExcelButton.addEventListener('click', () => {
+            if (logs.length === 0) { alert('Nenhum registro para exportar.'); return; }
+            if (typeof XLSX === 'undefined') {
+                alert('A biblioteca de exportação para Excel (SheetJS) não foi carregada.'); return;
+            }
+            const dataForExcel = logs.map(log => {
+                let formattedDate = "Data inválida"; let dayName = "";
+                 if (log.date && typeof log.date === 'string') {
+                    const dateObj = new Date(log.date + 'T00:00:00');
+                     if (!isNaN(dateObj)) {
+                        formattedDate = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                        dayName = dateObj.toLocaleDateString('pt-BR', { weekday: 'long' }); }
+                } else if (log.date && log.date.toDate) {
+                    const dateObj = log.date.toDate();
+                    formattedDate = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                    dayName = dateObj.toLocaleDateString('pt-BR', { weekday: 'long' });
+                }
+                const h = Math.floor(log.totalMinutes / 60);
+                const m = log.totalMinutes % 60;
+                return {
+                    'Curso/Atividade': log.description, 'Data': formattedDate, 'Dia da Semana': dayName,
+                    'Horas': h, 'Minutos': m, 'Status': log.status === 'concluido' ? 'Concluído' : 'Não Concluído'
+                };
+            });
+            const worksheet = XLSX.utils.json_to_sheet(dataForExcel);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Registros");
+            const totalMinutesOverall = logs.reduce((sum, log) => sum + log.totalMinutes, 0);
+            const totalH = Math.floor(totalMinutesOverall / 60);
+            const totalM = totalMinutesOverall % 60;
+            XLSX.utils.sheet_add_aoa(worksheet, [ [], ["Total Geral Horas:", totalH, "Total Geral Minutos:", totalM]], { origin: -1 });
+            XLSX.writeFile(workbook, `relatorio_trilha_edu_${currentUserId || 'export'}.xlsx`);
+        });
+
+        // --- Inicialização ---
+        const today = new Date().toISOString().split('T')[0];
+        dateInput.value = today; dateInput.max = today;
+        updateTimerDisplay(); pauseTimerButton.disabled = true; 
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
     <style>
-        /* Estilos CSS para a aplicação */
         :root {
-            --primary-color: #6a11cb; /* Roxo primário */
-            --secondary-color: #2575fc; /* Azul secundário */
-            --background-color: #f4f7f6; /* Cinza claro de fundo */
-            --card-color: #ffffff; /* Branco para cards */
-            --text-color: #333333; /* Cor de texto principal */
-            --light-gray: #e0e0e0; /* Cinza claro para bordas/divisores */
-            --green: #4CAF50; /* Verde para sucesso/salvar/concluído */
-            --red: #f44336; /* Vermelho para alertas/remover */
-            --orange: #ff9800; /* Laranja para timer/pendente */
+            --primary-color: #6a11cb; --secondary-color: #2575fc; --background-color: #f4f7f6;
+            --card-color: #ffffff; --text-color: #333333; --light-gray: #e0e0e0;
+            --green: #4CAF50; --red: #f44336; --orange: #ff9800;
             --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
         }
-
         body {
-            font-family: var(--font-family);
-            background-color: var(--background-color);
-            color: var(--text-color);
-            margin: 0;
-            padding: 20px;
-            display: flex;
-            justify-content: center;
-            align-items: flex-start;
-            min-height: 100vh;
-            box-sizing: border-box;
+            font-family: var(--font-family); background-color: var(--background-color); color: var(--text-color);
+            margin: 0; padding: 20px; display: flex; justify-content: center; align-items: flex-start;
+            min-height: 100vh; box-sizing: border-box;
         }
-
         .app-container {
-            width: 100%;
-            max-width: 800px;
-            background-color: var(--card-color);
-            border-radius: 15px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-            overflow: hidden;
+            width: 100%; max-width: 800px; background-color: var(--card-color);
+            border-radius: 15px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); overflow: hidden;
         }
-
         header {
-            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-            color: white;
-            padding: 30px;
-            text-align: center;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)); color: white;
+            padding: 20px 30px; text-align: center;
         }
-
-        header h1 {
-            margin: 0;
-            font-size: 1.8em;
-            font-weight: 700;
-        }
-
-        .summary-section {
-            padding: 25px 30px;
-            text-align: center;
-            border-bottom: 1px solid var(--light-gray);
-        }
-
-        .summary-section h2 {
-            margin: 0 0 10px;
-            color: var(--primary-color);
-            font-size: 1.2em;
-            font-weight: 600;
-        }
-
-        #total-hours {
-            font-size: 2.8em;
-            font-weight: 700;
-            color: var(--secondary-color);
-        }
-
-        main {
-            padding: 30px;
-        }
-
-        .main-actions {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            gap: 10px; /* Espaço entre os botões */
-        }
-
-        .main-actions button {
-            padding: 8px 15px;
-            background-color: var(--primary-color);
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 0.9em;
-            transition: background-color 0.3s;
-            flex-grow: 1; /* Faz os botões ocuparem espaço igual */
-        }
-        .main-actions button:hover {
-            background-color: var(--secondary-color);
-        }
-
-
-        .log-list-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px; /* Reduzido para acomodar os botões acima */
-        }
-
-        .log-list-header h3 {
-            margin: 0;
-            font-size: 1.4em;
-            color: var(--text-color);
-        }
-
-        #log-list {
-            list-style: none;
-            padding: 0;
-            margin: 0;
-        }
-
-        .log-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 18px 15px;
-            border-bottom: 1px solid var(--light-gray);
-            transition: background-color 0.3s;
-        }
-
-        .log-item:last-child {
-            border-bottom: none;
-        }
-
-        .log-item:hover {
-            background-color: #f9f9f9;
-        }
-
-        .log-item .info {
-            flex-grow: 1;
-        }
-
-        .log-item .description {
-            font-weight: 600;
-            font-size: 1.05em;
-            margin-bottom: 5px;
-        }
-
-        .log-item .date {
-            color: #555555;
-            font-size: 0.9em;
-        }
+        header h1 { margin: 0; font-size: 1.8em; font-weight: 700; }
         
-        .log-item .day-name {
-            text-transform: capitalize;
+        .auth-area { 
+            font-size: 0.9em; margin-top: 10px; display: flex; 
+            justify-content: center; align-items: center; gap: 15px; flex-wrap: wrap;
         }
-
-        .log-item .status {
-            font-size: 0.85em;
-            font-weight: 600;
-            padding: 3px 8px;
-            border-radius: 4px;
-            margin-top: 5px;
-            display: inline-block;
+        .auth-area button {
+            background-color: rgba(255,255,255,0.2); color: white; border: 1px solid white;
+            padding: 6px 12px; border-radius: 5px; cursor: pointer; font-size: 0.9em;
         }
-        .log-item .status.concluido {
-            background-color: var(--green);
-            color: white;
-        }
-        .log-item .status.nao-concluido {
-            background-color: var(--orange);
-            color: white;
-        }
+        .auth-area button:hover { background-color: rgba(255,255,255,0.3); }
+        #auth-controls-logged-in span { margin-right: 10px; }
 
 
-        .log-item .duration {
-            font-weight: 700;
-            font-size: 1.1em;
-            color: var(--secondary-color);
-            white-space: nowrap;
-            margin-left: 15px;
-            text-align: right;
-        }
-
-        .add-button {
-            position: fixed;
-            bottom: 30px;
-            right: 30px;
-            width: 60px;
-            height: 60px;
-            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-            color: white;
-            border: none;
-            border-radius: 50%;
-            font-size: 2.2em;
-            line-height: 60px;
-            text-align: center;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-            cursor: pointer;
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-            z-index: 999;
-        }
-
-        .add-button:hover {
-            transform: scale(1.1);
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
-        }
-
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            overflow: auto;
-            background-color: rgba(0,0,0,0.6);
-            justify-content: center;
-            align-items: center;
-            padding: 20px; /* Adiciona padding para o modal não colar nas bordas em telas pequenas */
+        .summary-section { padding: 25px 30px; text-align: center; border-bottom: 1px solid var(--light-gray); }
+        .summary-section h2 { margin: 0 0 10px; color: var(--primary-color); font-size: 1.2em; font-weight: 600; }
+        #total-hours { font-size: 2.8em; font-weight: 700; color: var(--secondary-color); }
+        main { padding: 30px; }
+        .main-actions { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; gap: 10px; flex-wrap: wrap; }
+        .main-actions button {
+            padding: 8px 15px; background-color: var(--primary-color); color: white; border: none;
+            border-radius: 5px; cursor: pointer; font-size: 0.9em; transition: background-color 0.3s;
+            flex-basis: calc(33.333% - 7px); /* Três botões por linha com gap */
             box-sizing: border-box;
         }
+        .main-actions button:hover { background-color: var(--secondary-color); }
 
+        .log-list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .log-list-header h3 { margin: 0; font-size: 1.4em; color: var(--text-color); }
+        #log-list { list-style: none; padding: 0; margin: 0; }
+        .log-item {
+            display: flex; justify-content: space-between; align-items: center; padding: 18px 15px;
+            border-bottom: 1px solid var(--light-gray); transition: background-color 0.3s;
+        }
+        .log-item:last-child { border-bottom: none; }
+        .log-item:hover { background-color: #f9f9f9; }
+        .log-item .info { flex-grow: 1; }
+        .log-item .description { font-weight: 600; font-size: 1.05em; margin-bottom: 5px; }
+        .log-item .date { color: #555555; font-size: 0.9em; }
+        .log-item .day-name { text-transform: capitalize; }
+        .log-item .status {
+            font-size: 0.85em; font-weight: 600; padding: 3px 8px; border-radius: 4px;
+            margin-top: 5px; display: inline-block;
+        }
+        .log-item .status.concluido { background-color: var(--green); color: white; }
+        .log-item .status.nao-concluido { background-color: var(--orange); color: white; }
+        .log-item .duration {
+            font-weight: 700; font-size: 1.1em; color: var(--secondary-color);
+            white-space: nowrap; margin-left: 15px; text-align: right;
+        }
+        .add-button {
+            position: fixed; bottom: 30px; right: 30px; width: 60px; height: 60px;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)); color: white;
+            border: none; border-radius: 50%; font-size: 2.2em; line-height: 60px; text-align: center;
+            display: flex; justify-content: center; align-items: center;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2); cursor: pointer;
+            transition: transform 0.3s ease, box-shadow 0.3s ease; z-index: 999;
+        }
+        .add-button:hover { transform: scale(1.1); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3); }
+        .modal {
+            display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%;
+            overflow: auto; background-color: rgba(0,0,0,0.6); justify-content: center; align-items: center;
+            padding: 20px; box-sizing: border-box;
+        }
         .modal-content {
-            background-color: var(--card-color);
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 5px 20px rgba(0,0,0,0.25);
-            width: 100%; /* Alterado para 100% para melhor responsividade */
-            max-width: 500px;
-            animation: slide-down 0.4s ease-out;
-            max-height: 90vh; /* Evita que o modal seja maior que a tela */
-            overflow-y: auto; /* Adiciona scroll se o conteúdo for maior */
+            background-color: var(--card-color); padding: 30px; border-radius: 10px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.25); width: 100%; max-width: 500px;
+            animation: slide-down 0.4s ease-out; max-height: 90vh; overflow-y: auto;
         }
+        #auth-modal .modal-content { max-width: 400px; } /* Modal de auth menor */
 
-        @keyframes slide-down {
-            from { transform: translateY(-50px); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
-        }
-
-        .modal-content h3 {
-            margin-top: 0;
-            margin-bottom: 25px;
-            text-align: center;
-            color: var(--primary-color);
-            font-size: 1.5em;
-        }
-
-        /* Estilos do Cronômetro */
+        @keyframes slide-down { from { transform: translateY(-50px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .modal-content h3 { margin-top: 0; margin-bottom: 25px; text-align: center; color: var(--primary-color); font-size: 1.5em; }
         .timer-section {
-            text-align: center;
-            margin-bottom: 20px;
-            padding: 15px;
-            background-color: #f9f9f9;
-            border-radius: 8px;
+            text-align: center; margin-bottom: 20px; padding: 15px; background-color: #f9f9f9; border-radius: 8px;
         }
-        #timer-display {
-            font-size: 2.2em;
-            font-weight: bold;
-            color: var(--primary-color);
-            margin-bottom: 10px;
-        }
+        #timer-display { font-size: 2.2em; font-weight: bold; color: var(--primary-color); margin-bottom: 10px; }
         .timer-controls button {
-            padding: 8px 15px;
-            margin: 0 5px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: 500;
-            transition: background-color 0.3s;
+            padding: 8px 15px; margin: 0 5px; border: none; border-radius: 5px; cursor: pointer;
+            font-weight: 500; transition: background-color 0.3s;
         }
         #start-timer { background-color: var(--green); color: white; }
         #pause-timer { background-color: var(--orange); color: white; }
         #reset-timer { background-color: var(--red); color: white; }
         #apply-timer { background-color: var(--secondary-color); color: white; margin-top:10px;}
-
-
-        .form-group {
-            margin-bottom: 20px;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            font-size: 0.95em;
-        }
-
-        .form-group input[type="text"],
-        .form-group input[type="date"],
-        .form-group input[type="number"],
-        .form-group select {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid var(--light-gray);
-            border-radius: 8px;
-            box-sizing: border-box;
-            font-size: 1em;
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: 600; font-size: 0.95em; }
+        .form-group input[type="text"], .form-group input[type="date"], .form-group input[type="number"], 
+        .form-group input[type="email"], .form-group input[type="password"], .form-group select {
+            width: 100%; padding: 12px; border: 1px solid var(--light-gray); border-radius: 8px;
+            box-sizing: border-box; font-size: 1em;
         }
         .form-group input:focus, .form-group select:focus {
-            outline: none;
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 2px rgba(106, 17, 203, 0.2);
+            outline: none; border-color: var(--primary-color); box-shadow: 0 0 0 2px rgba(106, 17, 203, 0.2);
         }
-
-        .form-group-inline {
-            display: flex;
-            gap: 15px;
-        }
-        .form-group-inline > div {
-            flex: 1;
-        }
-
-        .form-buttons {
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
-            margin-top: 30px;
-        }
-
+        .form-group-inline { display: flex; gap: 15px; }
+        .form-group-inline > div { flex: 1; }
+        .form-buttons { display: flex; justify-content: flex-end; gap: 10px; margin-top: 30px; }
         .form-buttons button {
-            padding: 12px 25px;
-            border-radius: 8px;
-            border: none;
-            cursor: pointer;
-            font-weight: 600;
-            font-size: 1em;
-            transition: background-color 0.3s ease, transform 0.2s ease;
+            padding: 12px 25px; border-radius: 8px; border: none; cursor: pointer;
+            font-weight: 600; font-size: 1em; transition: background-color 0.3s ease, transform 0.2s ease;
         }
+        #auth-form .form-buttons button { flex-grow: 1; } /* Botões do modal de auth ocupam mais espaço */
+        #auth-error-message { color: var(--red); font-size: 0.9em; margin-top: 10px; text-align: center; display: block;}
 
-        #save-log-button {
-            background-color: var(--green);
-            color: white;
-        }
-        #save-log-button:hover {
-            background-color: #45a049;
-            transform: translateY(-1px);
-        }
 
-        #cancel-log-button, #close-manage-courses-button {
-            background-color: #f0f0f0;
-            color: var(--text-color);
-        }
-         #cancel-log-button:hover, #close-manage-courses-button:hover {
-            background-color: #e0e0e0;
-            transform: translateY(-1px);
-        }
+        #save-log-button { background-color: var(--green); color: white; }
+        #save-log-button:hover { background-color: #45a049; transform: translateY(-1px); }
+        #cancel-log-button, #close-manage-courses-button, #cancel-auth-button { background-color: #f0f0f0; color: var(--text-color); }
+        #cancel-log-button:hover, #close-manage-courses-button:hover, #cancel-auth-button:hover { background-color: #e0e0e0; transform: translateY(-1px); }
         
-        .empty-list-message {
-            text-align: center;
-            color: #888888;
-            padding: 20px;
-            font-style: italic;
-        }
+        #login-button { background-color: var(--secondary-color); color: white;}
+        #register-button { background-color: var(--primary-color); color: white;}
 
-        /* Estilos para Gerenciamento de Cursos */
-        #manage-courses-modal .form-group {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        #new-course-name {
-            flex-grow: 1;
-        }
+
+        .empty-list-message { text-align: center; color: #888888; padding: 20px; font-style: italic; }
+        #manage-courses-modal .form-group { display: flex; align-items: center; gap: 10px; }
+        #new-course-name { flex-grow: 1; }
         #add-course-button {
-            padding: 12px 20px;
-            background-color: var(--green);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 0.9em;
+            padding: 12px 20px; background-color: var(--green); color: white; border: none;
+            border-radius: 8px; cursor: pointer; font-size: 0.9em;
         }
         #registered-courses-list {
-            list-style: none;
-            padding: 0;
-            margin-top: 20px;
-            max-height: 200px; /* Altura máxima para a lista de cursos */
-            overflow-y: auto; /* Scroll se a lista for grande */
-            border: 1px solid var(--light-gray);
-            border-radius: 8px;
+            list-style: none; padding: 0; margin-top: 20px; max-height: 200px;
+            overflow-y: auto; border: 1px solid var(--light-gray); border-radius: 8px;
         }
         .registered-course-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px 15px;
-            border-bottom: 1px solid var(--light-gray);
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 15px; border-bottom: 1px solid var(--light-gray);
         }
-        .registered-course-item:last-child {
-            border-bottom: none;
-        }
+        .registered-course-item:last-child { border-bottom: none; }
         .remove-course-button {
-            background-color: var(--red);
-            color: white;
-            border: none;
-            border-radius: 5px;
-            padding: 5px 10px;
-            cursor: pointer;
-            font-size: 0.8em;
+            background-color: var(--red); color: white; border: none; border-radius: 5px;
+            padding: 5px 10px; cursor: pointer; font-size: 0.8em;
         }
-
-
         @media (max-width: 600px) {
             body { padding: 0; }
             .app-container { border-radius: 0; min-height: 100vh; }
             header { padding: 20px; }
             header h1 { font-size: 1.5em; }
+            .auth-area { flex-direction: column; gap: 8px; }
+            .auth-area button { width: auto; }
             .summary-section, main { padding: 20px; }
             #total-hours { font-size: 2.2em; }
-            
-            .main-actions {
-                flex-direction: column; /* Empilha os botões */
-            }
-            .main-actions button {
-                width: 100%;
-            }
-
+            .main-actions { flex-direction: column; }
+            .main-actions button { width: 100%; flex-basis: auto; }
             .log-list-header h3 { font-size: 1.2em; text-align: center; width: 100%; margin-bottom: 10px;}
-
-
-            .log-item {
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 8px;
-                padding: 15px 10px;
-            }
+            .log-item { flex-direction: column; align-items: flex-start; gap: 8px; padding: 15px 10px; }
             .log-item .duration { margin-left: 0; align-self: flex-start; }
             .log-item .status { align-self: flex-start; }
-
-
             .add-button { width: 55px; height: 55px; font-size: 2em; line-height: 55px; bottom: 20px; right: 20px; }
-            .modal-content { width: 100%; padding: 20px; max-width: none; /* Remove max-width para ocupar a tela */ }
-            .form-buttons button { padding: 10px 20px; font-size: 0.95em; }
+            .modal-content { width: 100%; padding: 20px; max-width: none; }
+            .form-buttons button { padding: 10px 15px; font-size: 0.9em; }
+            #auth-form .form-buttons button { font-size: 1em; }
             #timer-display { font-size: 1.8em;}
             .timer-controls button { padding: 8px 10px; font-size: 0.9em;}
         }
     </style>
 </head>
 <body>
-
     <div class="app-container">
         <header>
             <h1>Trilha Edu</h1>
+            <div class="auth-area">
+                <div id="auth-controls-logged-out" style="display: none;">
+                    <button id="open-auth-modal-button">Login / Registrar</button>
+                </div>
+                <div id="auth-controls-logged-in" style="display: none; align-items: center; gap: 10px;">
+                    <span id="user-email-display"></span>
+                    <span id="user-id-display-info" style="font-size: 0.8em; opacity: 0.7;"></span>
+                    <button id="logout-button">Logout</button>
+                </div>
+            </div>
         </header>
         <section class="summary-section">
             <h2>Total de Horas de Treinamento</h2>
@@ -458,19 +712,42 @@
             </div>
             <div class="main-actions">
                 <button id="manage-courses-button">Gerenciar Cursos</button>
-                <button id="export-button">Exportar para TXT</button>
+                <button id="export-txt-button">Exportar para TXT</button> 
+                <button id="export-excel-button">Exportar para Excel</button>
             </div>
-            <ul id="log-list">
-                </ul>
+            <ul id="log-list"></ul>
         </main>
     </div>
 
     <button class="add-button" id="add-log-button" aria-label="Adicionar novo registro">+</button>
 
+    <div id="auth-modal" class="modal">
+        <div class="modal-content">
+            <h3>Login / Registrar</h3>
+            <form id="auth-form">
+                <div class="form-group">
+                    <label for="auth-email">Email</label>
+                    <input type="email" id="auth-email" required>
+                </div>
+                <div class="form-group">
+                    <label for="auth-password">Senha (mínimo 6 caracteres)</label>
+                    <input type="password" id="auth-password" required minlength="6">
+                </div>
+                <div id="auth-error-message"></div>
+                <div class="form-buttons" style="margin-top: 15px;">
+                    <button type="button" id="login-button">Login</button>
+                    <button type="button" id="register-button">Registrar Nova Conta</button>
+                </div>
+                 <div class="form-buttons" style="margin-top: 10px; justify-content: center;">
+                    <button type="button" id="cancel-auth-button" style="background-color: var(--light-gray); color: var(--text-color); flex-grow: 0.5;">Cancelar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <div id="log-modal" class="modal">
         <div class="modal-content">
             <h3>Registrar Horas</h3>
-            
             <div class="timer-section">
                 <div id="timer-display">00:00:00</div>
                 <div class="timer-controls">
@@ -480,27 +757,19 @@
                 </div>
                 <button id="apply-timer">Usar Tempo do Cronômetro</button>
             </div>
-
             <form id="log-form">
                 <div class="form-group">
                     <label for="description">Curso / Atividade</label>
                     <input type="text" id="description" name="description" list="course-suggestions" required>
-                    <datalist id="course-suggestions">
-                        </datalist>
+                    <datalist id="course-suggestions"></datalist>
                 </div>
                 <div class="form-group">
                     <label for="date">Data</label>
                     <input type="date" id="date" name="date" required>
                 </div>
                 <div class="form-group form-group-inline">
-                    <div>
-                        <label for="hours">Horas</label>
-                        <input type="number" id="hours" name="hours" min="0" max="23" placeholder="h">
-                    </div>
-                    <div>
-                        <label for="minutes">Minutos</label>
-                        <input type="number" id="minutes" name="minutes" min="0" max="59" placeholder="m">
-                    </div>
+                    <div><label for="hours">Horas</label><input type="number" id="hours" name="hours" min="0" max="23" placeholder="h"></div>
+                    <div><label for="minutes">Minutos</label><input type="number" id="minutes" name="minutes" min="0" max="59" placeholder="m"></div>
                 </div>
                 <div class="form-group">
                     <label for="status">Status</label>
@@ -522,333 +791,16 @@
             <h3>Gerenciar Cursos Cadastrados</h3>
             <form id="add-course-form">
                 <div class="form-group">
-                    <label for="new-course-name" class="sr-only">Nome do Novo Curso</label> <input type="text" id="new-course-name" placeholder="Digite o nome do curso" required>
+                    <label for="new-course-name" class="sr-only">Nome do Novo Curso</label>
+                    <input type="text" id="new-course-name" placeholder="Digite o nome do curso" required>
                     <button type="submit" id="add-course-button">Adicionar</button>
                 </div>
             </form>
-            <ul id="registered-courses-list">
-                </ul>
+            <ul id="registered-courses-list"></ul>
             <div class="form-buttons">
                 <button type="button" id="close-manage-courses-button">Fechar</button>
             </div>
         </div>
     </div>
-
-
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const addLogButton = document.getElementById('add-log-button');
-            const logModal = document.getElementById('log-modal');
-            const cancelLogButton = document.getElementById('cancel-log-button');
-            const logForm = document.getElementById('log-form');
-            const logList = document.getElementById('log-list');
-            const totalHoursDisplay = document.getElementById('total-hours');
-            const dateInput = document.getElementById('date');
-            const exportButton = document.getElementById('export-button');
-            const courseSuggestionsDatalist = document.getElementById('course-suggestions');
-
-            // Elementos para Gerenciar Cursos
-            const manageCoursesButton = document.getElementById('manage-courses-button');
-            const manageCoursesModal = document.getElementById('manage-courses-modal');
-            const closeManageCoursesButton = document.getElementById('close-manage-courses-button');
-            const addCourseForm = document.getElementById('add-course-form');
-            const newCourseNameInput = document.getElementById('new-course-name');
-            const registeredCoursesList = document.getElementById('registered-courses-list');
-
-
-            // Cronômetro
-            const timerDisplay = document.getElementById('timer-display');
-            const startTimerButton = document.getElementById('start-timer');
-            const pauseTimerButton = document.getElementById('pause-timer');
-            const resetTimerButton = document.getElementById('reset-timer');
-            const applyTimerButton = document.getElementById('apply-timer');
-            let timerInterval;
-            let timerSeconds = 0;
-            let timerRunning = false;
-
-            let logs = JSON.parse(localStorage.getItem('trainingLogsEduV3')) || [];
-            let registeredCourses = JSON.parse(localStorage.getItem('registeredCoursesEduV3')) || [];
-
-            // --- Funções do Modal de Registro de Horas ---
-            const openLogModal = () => {
-                logModal.style.display = 'flex';
-                populateCourseSuggestions();
-                document.getElementById('description').focus();
-                resetTimer(); 
-            }
-            const closeLogModal = () => {
-                logModal.style.display = 'none';
-                logForm.reset();
-                resetTimer(); 
-            }
-            addLogButton.addEventListener('click', openLogModal);
-            cancelLogButton.addEventListener('click', closeLogModal);
-            window.addEventListener('click', (event) => {
-                if (event.target === logModal) closeLogModal();
-                if (event.target === manageCoursesModal) closeManageCoursesModal();
-            });
-            window.addEventListener('keydown', (event) => {
-                if (event.key === 'Escape') {
-                    if (logModal.style.display === 'flex') closeLogModal();
-                    if (manageCoursesModal.style.display === 'flex') closeManageCoursesModal();
-                }
-            });
-
-            // --- Funções do Modal de Gerenciar Cursos ---
-            const openManageCoursesModal = () => {
-                manageCoursesModal.style.display = 'flex';
-                renderRegisteredCourses();
-                newCourseNameInput.focus();
-            }
-            const closeManageCoursesModal = () => {
-                manageCoursesModal.style.display = 'none';
-                addCourseForm.reset();
-            }
-            manageCoursesButton.addEventListener('click', openManageCoursesModal);
-            closeManageCoursesButton.addEventListener('click', closeManageCoursesModal);
-
-            // --- Lógica de Gerenciamento de Cursos ---
-            function renderRegisteredCourses() {
-                registeredCoursesList.innerHTML = '';
-                if (registeredCourses.length === 0) {
-                    registeredCoursesList.innerHTML = '<li class="empty-list-message">Nenhum curso cadastrado.</li>';
-                    return;
-                }
-                registeredCourses.forEach(course => {
-                    const listItem = document.createElement('li');
-                    listItem.classList.add('registered-course-item');
-                    listItem.textContent = course;
-                    
-                    const removeButton = document.createElement('button');
-                    removeButton.classList.add('remove-course-button');
-                    removeButton.textContent = 'Remover';
-                    removeButton.addEventListener('click', () => {
-                        removeCourse(course);
-                    });
-                    listItem.appendChild(removeButton);
-                    registeredCoursesList.appendChild(listItem);
-                });
-            }
-
-            function addCourse(courseName) {
-                if (courseName && !registeredCourses.includes(courseName)) {
-                    registeredCourses.push(courseName);
-                    registeredCourses.sort(); // Mantém a lista ordenada
-                    localStorage.setItem('registeredCoursesEduV3', JSON.stringify(registeredCourses));
-                    renderRegisteredCourses();
-                    populateCourseSuggestions(); // Atualiza datalist no formulário de log
-                }
-            }
-
-            function removeCourse(courseName) {
-                registeredCourses = registeredCourses.filter(course => course !== courseName);
-                localStorage.setItem('registeredCoursesEduV3', JSON.stringify(registeredCourses));
-                renderRegisteredCourses();
-                populateCourseSuggestions(); // Atualiza datalist no formulário de log
-            }
-
-            addCourseForm.addEventListener('submit', (e) => {
-                e.preventDefault();
-                const courseName = newCourseNameInput.value.trim();
-                if (courseName) {
-                    addCourse(courseName);
-                    newCourseNameInput.value = ''; // Limpa o campo
-                } else {
-                    alert("Por favor, digite um nome para o curso.");
-                }
-            });
-
-            function populateCourseSuggestions() {
-                courseSuggestionsDatalist.innerHTML = '';
-                registeredCourses.forEach(course => {
-                    const option = document.createElement('option');
-                    option.value = course;
-                    courseSuggestionsDatalist.appendChild(option);
-                });
-            }
-
-
-            // --- Lógica do Cronômetro ---
-            function formatTime(totalSeconds) {
-                const h = Math.floor(totalSeconds / 3600);
-                const m = Math.floor((totalSeconds % 3600) / 60);
-                const s = totalSeconds % 60;
-                return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-            }
-            function updateTimerDisplay() {
-                timerDisplay.textContent = formatTime(timerSeconds);
-            }
-            startTimerButton.addEventListener('click', () => {
-                if (!timerRunning) {
-                    timerRunning = true;
-                    startTimerButton.disabled = true;
-                    pauseTimerButton.disabled = false;
-                    timerInterval = setInterval(() => {
-                        timerSeconds++;
-                        updateTimerDisplay();
-                    }, 1000);
-                }
-            });
-            pauseTimerButton.addEventListener('click', () => {
-                if (timerRunning) {
-                    timerRunning = false;
-                    startTimerButton.disabled = false;
-                    pauseTimerButton.disabled = true;
-                    clearInterval(timerInterval);
-                }
-            });
-            function resetTimer() {
-                timerRunning = false;
-                clearInterval(timerInterval);
-                timerSeconds = 0;
-                updateTimerDisplay();
-                startTimerButton.disabled = false;
-                pauseTimerButton.disabled = true;
-            }
-            resetTimerButton.addEventListener('click', resetTimer);
-            applyTimerButton.addEventListener('click', () => {
-                const h = Math.floor(timerSeconds / 3600);
-                const m = Math.floor((timerSeconds % 3600) / 60);
-                document.getElementById('hours').value = h > 0 ? h : '';
-                document.getElementById('minutes').value = m > 0 ? m : '';
-                if (h === 0 && m === 0 && timerSeconds > 0) { 
-                     document.getElementById('minutes').value = 1;
-                }
-            });
-
-            // --- Lógica de Registro de Horas ---
-            logForm.addEventListener('submit', (e) => {
-                e.preventDefault();
-                
-                const description = document.getElementById('description').value;
-                const dateValue = document.getElementById('date').value;
-                const hours = parseInt(document.getElementById('hours').value) || 0;
-                const minutes = parseInt(document.getElementById('minutes').value) || 0;
-                const status = document.getElementById('status').value;
-                
-                const dateObj = new Date(dateValue + 'T00:00:00');
-                const dayOfWeek = dateObj.getDay();
-
-                if (dayOfWeek === 0 || dayOfWeek === 6) { 
-                    alert('Por favor, selecione apenas dias úteis (Segunda a Sexta).');
-                    return;
-                }
-                if (description.trim() === '') {
-                    alert('Por favor, preencha a descrição do curso/atividade.');
-                    document.getElementById('description').focus();
-                    return;
-                }
-                if (hours === 0 && minutes === 0) {
-                    alert('Por favor, insira uma duração válida (horas ou minutos).');
-                    document.getElementById('hours').focus();
-                    return;
-                }
-
-                const totalMinutes = (hours * 60) + minutes;
-                const newLog = {
-                    id: Date.now(), description, date: dateValue, totalMinutes, status
-                };
-                logs.push(newLog);
-                saveAndRenderLogs();
-                closeLogModal();
-            });
-            
-            function saveAndRenderLogs() {
-                logs.sort((a, b) => new Date(b.date) - new Date(a.date));
-                localStorage.setItem('trainingLogsEduV3', JSON.stringify(logs));
-                renderLogs();
-                updateTotalHours();
-            }
-
-            function renderLogs() {
-                logList.innerHTML = '';
-                if (logs.length === 0) {
-                    logList.innerHTML = '<li class="empty-list-message">Nenhum registro encontrado. Adicione suas horas de treinamento!</li>';
-                } else {
-                    logs.forEach(log => {
-                        const li = document.createElement('li');
-                        li.classList.add('log-item');
-                        
-                        const dateObj = new Date(log.date + 'T00:00:00');
-                        const formattedDate = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                        const dayName = dateObj.toLocaleDateString('pt-BR', { weekday: 'long' });
-
-                        const h = Math.floor(log.totalMinutes / 60);
-                        const m = log.totalMinutes % 60;
-                        const statusText = log.status === 'concluido' ? 'Concluído' : 'Não Concluído';
-
-                        li.innerHTML = `
-                            <div class="info">
-                                <div class="description">${escapeHTML(log.description)}</div>
-                                <div class="date">${formattedDate} (<span class="day-name">${dayName}</span>)</div>
-                                <div class="status ${log.status}">${statusText}</div>
-                            </div>
-                            <div class="duration">${h}h ${m}m</div>
-                        `;
-                        logList.appendChild(li);
-                    });
-                }
-            }
-
-            function updateTotalHours() {
-                const totalMinutesOverall = logs.reduce((sum, log) => sum + log.totalMinutes, 0);
-                const totalH = Math.floor(totalMinutesOverall / 60);
-                const totalM = totalMinutesOverall % 60;
-                totalHoursDisplay.textContent = `${totalH}h ${totalM}m`;
-            }
-
-            function escapeHTML(str) {
-                const div = document.createElement('div');
-                div.appendChild(document.createTextNode(str));
-                return div.innerHTML;
-            }
-
-            // --- Lógica para Exportar TXT ---
-            exportButton.addEventListener('click', () => {
-                if (logs.length === 0) {
-                    alert('Nenhum registro para exportar.');
-                    return;
-                }
-                let txtContent = "Relatório de Horas de Treinamento - Trilha Edu\n\n";
-                const totalMinutesOverall = logs.reduce((sum, log) => sum + log.totalMinutes, 0);
-                const totalH = Math.floor(totalMinutesOverall / 60);
-                const totalM = totalMinutesOverall % 60;
-                txtContent += `Total de Horas Registradas: ${totalH}h ${totalM}m\n`;
-                txtContent += "--------------------------------------------------\n\n";
-                logs.forEach(log => {
-                    const dateObj = new Date(log.date + 'T00:00:00');
-                    const formattedDate = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                    const dayName = dateObj.toLocaleDateString('pt-BR', { weekday: 'long' });
-                    const h = Math.floor(log.totalMinutes / 60);
-                    const m = log.totalMinutes % 60;
-                    const statusText = log.status === 'concluido' ? 'Concluído' : 'Não Concluído';
-                    txtContent += `Curso/Atividade: ${log.description}\n`;
-                    txtContent += `Data: ${formattedDate} (${dayName})\n`;
-                    txtContent += `Duração: ${h}h ${m}m\n`;
-                    txtContent += `Status: ${statusText}\n`;
-                    txtContent += "--------------------------------------------------\n";
-                });
-                const blob = new Blob([txtContent], { type: 'text/plain;charset=utf-8' });
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(blob);
-                link.download = 'relatorio_trilha_edu.txt';
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                URL.revokeObjectURL(link.href);
-            });
-
-            // --- Inicialização ---
-            const today = new Date().toISOString().split('T')[0];
-            dateInput.value = today;
-            dateInput.max = today;
-
-            saveAndRenderLogs(); 
-            renderRegisteredCourses(); // Para garantir que a lista de cursos no modal de gerenciamento esteja atualizada
-            populateCourseSuggestions(); // Para garantir que o datalist esteja populado ao carregar
-            updateTimerDisplay(); 
-            pauseTimerButton.disabled = true; 
-        });
-    </script>
 </body>
 </html>
